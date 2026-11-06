@@ -2,22 +2,7 @@
 'use strict';
 const $=id=>document.getElementById(id), E=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let raw=null, reports=[], latest=null, annual=[], chosen={}, selectedPeriod='', activeTab='overview';
-const F={
- minorityEquity:{sheet:'b',label:'少数股东权益',names:['MINORITY_EQUITY','MINORITY_INTEREST','MINORITY_SHAREHOLDERS_EQUITY','MINORITY_SHAREHOLDER_EQUITY']},
- equity:{sheet:'b',label:'所有者权益合计',names:['TOTAL_EQUITY','TOTAL_OWNERS_EQUITY','TOTAL_SHAREHOLDERS_EQUITY']},
- minorityProfit:{sheet:'i',label:'少数股东损益',names:['MINORITY_INTEREST','MINORITY_NETPROFIT','MINORITY_PROFIT','MINORITY_GAIN','MINORITY_NET_PROFIT']},
- profit:{sheet:'i',label:'合并净利润',names:['NETPROFIT','NET_PROFIT','NET_INCOME','TOTAL_NETPROFIT']},
- parentProfit:{sheet:'i',label:'归母净利润',names:['PARENT_NETPROFIT','PARENT_NET_PROFIT']},
- revenue:{sheet:'i',label:'营业收入',names:['OPERATE_INCOME','TOTAL_OPERATE_INCOME','OPERATING_REVENUE']},
- ocf:{sheet:'c',label:'经营活动现金流净额',names:['NETCASH_OPERATE','NET_CASH_OPERATE','NET_OPERATE_CASHFLOW']},
- receivable:{sheet:'b',label:'应收账款',names:['ACCOUNTS_RECE','ACCOUNTS_RECEIVABLE']},
- inventory:{sheet:'b',label:'存货',names:['INVENTORY']},
- monetary:{sheet:'b',label:'货币资金',names:['MONETARYFUNDS','MONETARY_FUNDS']},
- shortDebt:{sheet:'b',label:'短期借款',names:['SHORT_LOAN','SHORT_TERM_LOAN','SHORT_BORROWINGS']},
- currentLongDebt:{sheet:'b',label:'一年内到期非流动负债',names:['NONCURRENT_LIAB_1YEAR','NONCURRENT_LIABILITY_1YEAR','NONCURRENT_LIAB_DUE_1YEAR']},
- assets:{sheet:'b',label:'资产总计',names:['TOTAL_ASSETS']},
- liabilities:{sheet:'b',label:'负债合计',names:['TOTAL_LIABILITIES']},
-};
+
 function number(v){if(v===null||v===undefined||v==='--'||(typeof v==='string'&&!v.trim())||typeof v==='boolean')return null;const n=Number(v);return Number.isFinite(n)?n:null}
 function field(r,k){const d=F[k],source=r?.[d.sheet];if(!source)return null;const keys=Object.keys(source);return (chosen[k]&&keys.includes(chosen[k])?chosen[k]:d.names.find(n=>keys.includes(n)))||null}
 function val(r,k){const key=field(r,k);return key?number(r[F[k].sheet]?.[key]):null}
@@ -89,12 +74,30 @@ function showData(data,cached=false){
   $('status').classList.toggle('err',cached);
   renderAll();
 }
+let historyExpanded=new Set();
+function historyMarkup(list){
+  if(!list.length)return '';
+  return `<div class="history-header"><div><h3>查询分类 <span>${list.length} 家</span></h3><p>基于已缓存财报的研究筛选，不是买卖建议。点击公司重新查询。</p></div><details class="history-rules"><summary>分类依据</summary><p>推荐：四组分析均可计算且未触发提示线。保留意见：存在一般提示、数据不足或指标不适用。不推荐：少数股东偏离超过 3 倍，或归母盈利但经营现金净流出。</p><p>前三项按最新配对报告期判断；经营占款使用最近两个连续完整年度。命中较高关注条件优先归类，不按提示数量累加。经验提示线不代表行业标准。</p></details></div><div class="history-groups">`+[1,2,3].map(level=>{
+    const items=list.filter(item=>item.classification?.level===level);
+    const expanded=historyExpanded.has(level);
+    const visible=expanded?items:items.slice(0,6);
+    const description=({1:'资料可评估，未触发当前筛选规则',2:'存在关注项，或信息尚不足',3:'触发需优先核查的重点线索'})[level];
+    return `<section class="history-group history-level-${level}"><div class="history-group-title"><strong>${Classification.labels[level]}</strong><span>${items.length}</span></div><p class="history-description">${description}</p><div class="history-items">${visible.map(item=>{
+      const result=item.classification;
+      const reason=[...result.reasons,...result.missing].join('；')||'四组分析均可计算，未触发提示线';
+      const date=result.period?periodName(result.period):'报告期不完整';
+      const cached=new Date(item.fetchedAt).toLocaleString('zh-CN',{hour12:false});
+      return `<button class="history-company" data-code="${E(item.code)}" title="${E(reason)}；${E(date)}；缓存 ${E(cached)}"><span class="history-company-title"><b>${E(item.name)}</b><span>${E(item.code)}</span></span><span class="history-reason">${E(reason)}</span><span class="history-date">${E(date)} · 缓存 ${E(cached)}</span></button>`;
+    }).join('')||'<div class="history-none">暂无公司</div>'}</div>${items.length>6?`<button class="history-more" data-expand="${level}">${expanded?'收起':'展开其余 '+(items.length-6)+' 家'}</button>`:''}</section>`;
+  }).join('')+'</div>';
+}
 async function showHistory(){
   try {
     const list=await window.finscope.history();
-    $('history').innerHTML=list.length?'<span>最近查询</span>'+list.map(x=>`<button class="smallbtn" data-code="${E(x.code)}">${E(x.name)} <span class="muted">${E(x.code)}</span></button>`).join(''):'';
-    $('history').querySelectorAll('[data-code]').forEach(button=>button.onclick=()=>{$('stock').value=button.dataset.code;search()});
-  }catch{ $('history').textContent='查询历史暂不可用'; }
+    $('history').innerHTML=historyMarkup(list);
+    $('history').querySelectorAll('[data-code]').forEach(button=>button.onclick=()=>{if($('search').disabled)return;$('stock').value=button.dataset.code;search()});
+    $('history').querySelectorAll('[data-expand]').forEach(button=>button.onclick=()=>{const level=Number(button.dataset.expand);historyExpanded.has(level)?historyExpanded.delete(level):historyExpanded.add(level);showHistory()});
+  }catch{ $('history').textContent='查询分类暂不可用'; }
 }
 async function search(){
   const stock=codeOf($('stock').value),status=$('status');

@@ -23,6 +23,20 @@ app.on('browser-window-created',(_event,win)=>{
           data.c.push({REPORT_DATE:date,NETCASH_OPERATE:15e8});
         }
         await win.webContents.executeJavaScript(`showData(${JSON.stringify(data)})`);
+        const cacheDir=path.join(app.getPath('userData'),'reports');await fs.mkdir(cacheDir,{recursive:true});
+        for(let n=0;n<15;n++){
+          const sample=structuredClone(data);sample.stock={code:String(600100+n),secu:`${600100+n}.SH`};
+          sample.b.forEach(r=>r.SECURITY_NAME_ABBR=`分类测试 ${n+1}`);
+          sample.i.forEach(r=>r.MINORITY_NETPROFIT=n<7?2e8:n<14?4e8:8e8);
+          sample.c.forEach(r=>r.NETCASH_OPERATE=20e8);
+          await fs.writeFile(path.join(cacheDir,sample.stock.code+'.json'),JSON.stringify(sample));
+        }
+        await win.webContents.executeJavaScript('showHistory()');
+        const history=await win.webContents.executeJavaScript('window.finscope.history()');
+        if(history.length!==15)throw Error('历史查询仍被截断');
+        for(const level of [1,2,3])if(!history.some(x=>x.classification.level===level))throw Error('缺少分类：'+level);
+        await win.webContents.executeJavaScript('historyExpanded.add(1);showHistory()');
+        if(await win.webContents.executeJavaScript('document.querySelectorAll(".history-level-1 [data-code]").length')!==7)throw Error('分类展开数量错误');
       }
       for(const tab of ['overview','minority','cash','working','debt','about']){
         const length=await win.webContents.executeJavaScript(`switchTab('${tab}');document.getElementById('panel-${tab}').innerText.length`);
@@ -45,6 +59,8 @@ app.on('browser-window-created',(_event,win)=>{
       await win.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
       const output=path.join(__dirname,'../test-results');await fs.mkdir(output,{recursive:true});
       await fs.writeFile(path.join(output,'desktop.png'),(await win.webContents.capturePage()).toPNG());
+      await win.webContents.executeJavaScript('document.getElementById("history").scrollIntoView();new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      await fs.writeFile(path.join(output,'classification.png'),(await win.webContents.capturePage()).toPNG());
       await win.webContents.executeJavaScript('document.querySelector(".ticker").scrollIntoView();new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
       await fs.writeFile(path.join(output,'overview.png'),(await win.webContents.capturePage()).toPNG());
       await win.webContents.executeJavaScript('document.querySelector(".chart-section").scrollIntoView();new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');

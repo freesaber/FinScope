@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const fs=require('node:fs');
-const source=fs.readFileSync('src/insights.js','utf8')+'\n'+fs.readFileSync('src/renderer.js','utf8').split('document.querySelectorAll(\'.tab\').forEach(el=>el.onclick=')[0];
+const source=fs.readFileSync('src/fields.js','utf8')+'\n'+fs.readFileSync('src/insights.js','utf8')+'\n'+fs.readFileSync('src/renderer.js','utf8').split('document.querySelectorAll(\'.tab\').forEach(el=>el.onclick=')[0];
 function run(code){return vm.runInNewContext(source+'\n'+code);}
 test('参考分区边界与白话解读准确，倍数和缺失值清楚显示',()=>{
   assert.equal(run('times(4.18)'), '4.18 倍');
