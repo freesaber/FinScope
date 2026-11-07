@@ -9,6 +9,7 @@ app.on('web-contents-created',(_event,contents)=>{
 app.on('browser-window-created',(_event,win)=>{
   win.webContents.once('did-finish-load',async()=>{
     try{
+      if(win.isMaximizable()||win.isFullScreenable())throw Error('窗口仍允许最大化或全屏');
       const security=await win.webContents.executeJavaScript('({node:typeof require,bridge:typeof window.finscope?.analyze})');
       if(security.node!=='undefined'||security.bridge!=='function')throw Error('预加载或进程隔离失败');
       if(process.argv.includes('--live')){
@@ -32,6 +33,7 @@ app.on('browser-window-created',(_event,win)=>{
           await fs.writeFile(path.join(cacheDir,sample.stock.code+'.json'),JSON.stringify(sample));
         }
         await win.webContents.executeJavaScript('showHistory()');
+        if(await win.webContents.executeJavaScript('Boolean(document.querySelector(".history-rules"))'))throw Error('分类依据入口未移除');
         const history=await win.webContents.executeJavaScript('window.finscope.history()');
         if(history.length!==15)throw Error('历史查询仍被截断');
         for(const level of [1,2,3])if(!history.some(x=>x.classification.level===level))throw Error('缺少分类：'+level);

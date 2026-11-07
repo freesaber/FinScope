@@ -77,7 +77,7 @@ function showData(data,cached=false){
 let historyExpanded=new Set();
 function historyMarkup(list){
   if(!list.length)return '';
-  return `<div class="history-header"><div><h3>查询分类 <span>${list.length} 家</span></h3><p>基于已缓存财报的研究筛选，不是买卖建议。点击公司重新查询。</p></div><details class="history-rules"><summary>分类依据</summary><p>推荐：四组分析均可计算且未触发提示线。保留意见：存在一般提示、数据不足或指标不适用。不推荐：少数股东偏离超过 3 倍，或归母盈利但经营现金净流出。</p><p>前三项按最新配对报告期判断；经营占款使用最近两个连续完整年度。命中较高关注条件优先归类，不按提示数量累加。经验提示线不代表行业标准。</p></details></div><div class="history-groups">`+[1,2,3].map(level=>{
+  return `<div class="history-header"><div><h3>查询分类 <span>${list.length} 家</span></h3><p>基于已缓存财报的研究筛选，不是买卖建议。点击公司重新查询。</p></div></div><div class="history-groups">`+[1,2,3].map(level=>{
     const items=list.filter(item=>item.classification?.level===level);
     const expanded=historyExpanded.has(level);
     const visible=expanded?items:items.slice(0,6);
