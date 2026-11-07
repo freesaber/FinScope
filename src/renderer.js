@@ -87,14 +87,17 @@ function historyMarkup(list){
       const reason=[...result.reasons,...result.missing].join('；')||'四组分析均可计算，未触发提示线';
       const date=result.period?periodName(result.period):'报告期不完整';
       const cached=new Date(item.fetchedAt).toLocaleString('zh-CN',{hour12:false});
-      return `<button class="history-company" data-code="${E(item.code)}" title="${E(reason)}；${E(date)}；缓存 ${E(cached)}"><span class="history-company-title"><b>${E(item.name)}</b><span>${E(item.code)}</span></span><span class="history-reason">${E(reason)}</span><span class="history-date">${E(date)} · 缓存 ${E(cached)}</span></button>`;
+      return `<div class="history-card" data-record="${E(item.code)}" data-level="${level}"><button class="history-drag" data-drag="${E(item.code)}" draggable="true" aria-label="拖动排序 ${E(item.name)}，也可按上下方向键" title="拖动排序，也可按上下方向键">⠿</button><button class="history-remove" data-remove="${E(item.code)}" aria-label="删除 ${E(item.name)} 的查询记录及本地缓存" title="删除查询记录及本地缓存">删除</button><button class="history-company" data-code="${E(item.code)}" title="${E(reason)}；${E(date)}；缓存 ${E(cached)}"><span class="history-company-title"><b>${E(item.name)}</b><span>${E(item.code)}</span></span><span class="history-reason">${E(reason)}</span><span class="history-date">${E(date)} · 缓存 ${E(cached)}</span></button></div>`;
     }).join('')||'<div class="history-none">暂无公司</div>'}</div>${items.length>6?`<button class="history-more" data-expand="${level}">${expanded?'收起':'展开其余 '+(items.length-6)+' 家'}</button>`:''}</section>`;
   }).join('')+'</div>';
 }
 async function showHistory(){
   try {
+    const scrolls=[...$('history').querySelectorAll('.history-items')].map(el=>el.scrollTop);
     const list=await window.finscope.history();
     $('history').innerHTML=historyMarkup(list);
+    $('history').querySelectorAll('.history-items').forEach((el,i)=>el.scrollTop=scrolls[i]||0);
+    bindHistoryControls(list);
     $('history').querySelectorAll('[data-code]').forEach(button=>button.onclick=()=>{if($('search').disabled)return;$('stock').value=button.dataset.code;search()});
     $('history').querySelectorAll('[data-expand]').forEach(button=>button.onclick=()=>{const level=Number(button.dataset.expand);historyExpanded.has(level)?historyExpanded.delete(level):historyExpanded.add(level);showHistory()});
   }catch{ $('history').textContent='查询分类暂不可用'; }

@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 const {loadReports, stockCode} = require('./data.cjs');
-const {classify} = require('../src/classification.js');
+const {createHistoryStore} = require('./history.cjs');
 const page = path.join(__dirname, '../src/index.html');
 let window;
 const cacheFile = code => path.join(app.getPath('userData'), 'reports', `${stockCode(code).code}.json`);
@@ -16,6 +16,7 @@ function trusted(event) {
   if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== pathToFileURL(page).href) throw new Error('请求来源无效');
 }
 function registerHandlers() {
+  const history=createHistoryStore(app.getPath('userData'));
   ipcMain.handle('reports:load', async (event, code) => {
     trusted(event);
     const data = await loadReports(code, net.fetch);
@@ -30,13 +31,10 @@ function registerHandlers() {
   ipcMain.handle('reports:cached', (event, code) => { trusted(event); return readCache(code); });
   ipcMain.handle('reports:history', async event => {
     trusted(event);
-    const dir = path.join(app.getPath('userData'), 'reports');
-    const files = await fs.readdir(dir).catch(() => []);
-    const items = await Promise.all(files.filter(file => /^\d{6}\.json$/.test(file)).map(async file => {
-      try { const data = await readCache(file.slice(0, 6)); return {code: data.stock.code, name: data.b[0]?.SECURITY_NAME_ABBR || data.stock.code, fetchedAt: data.fetchedAt, classification:classify(data)}; } catch { return null; }
-    }));
-    return items.filter(Boolean).sort((a,b) => b.fetchedAt.localeCompare(a.fetchedAt));
+    return history.list();
   });
+  ipcMain.handle('reports:remove', (event, code) => {trusted(event);return history.remove(code);});
+  ipcMain.handle('reports:move', (event, code, target, after) => {trusted(event);return history.move(code,target,after);});
   ipcMain.handle('reports:export', async (event, code, content) => {
     trusted(event);
     const stock = stockCode(code);

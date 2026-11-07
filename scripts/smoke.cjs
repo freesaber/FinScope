@@ -37,6 +37,22 @@ app.on('browser-window-created',(_event,win)=>{
         for(const level of [1,2,3])if(!history.some(x=>x.classification.level===level))throw Error('缺少分类：'+level);
         await win.webContents.executeJavaScript('historyExpanded.add(1);showHistory()');
         if(await win.webContents.executeJavaScript('document.querySelectorAll(".history-level-1 [data-code]").length')!==7)throw Error('分类展开数量错误');
+        await win.webContents.executeJavaScript(`
+          const handle=document.querySelector('[data-drag="600106"]'),target=document.querySelector('[data-record="600100"]');
+          handle.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:new DataTransfer()}));
+          target.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:new DataTransfer(),clientY:target.getBoundingClientRect().top+1}));
+          target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:new DataTransfer(),clientY:target.getBoundingClientRect().top+1}));
+        `);
+        await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>historyMutation?setTimeout(check,20):resolve();check()})');
+        if((await win.webContents.executeJavaScript('window.finscope.history()'))[0].code!=='600106')throw Error('拖动排序未保存');
+        await win.webContents.executeJavaScript('showHistory()');
+        if(await win.webContents.executeJavaScript('document.querySelector(".history-level-1 [data-code]").dataset.code')!=='600106')throw Error('重新读取后顺序丢失');
+        await win.webContents.executeJavaScript(`document.querySelector('[data-remove="600106"]').click()`);
+        await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>historyMutation?setTimeout(check,20):resolve();check()})');
+        if((await win.webContents.executeJavaScript('window.finscope.history()')).length!==14)throw Error('删除没有更新分类数量');
+        if(await win.webContents.executeJavaScript('window.finscope.cached("600106")')!==null)throw Error('删除没有清除缓存');
+        if(await win.webContents.executeJavaScript('document.getElementById("search").disabled'))throw Error('删除或拖动误触查询');
+        await win.webContents.executeJavaScript('document.querySelector(".history-drag").focus()');
       }
       for(const tab of ['overview','minority','cash','working','debt','about']){
         const length=await win.webContents.executeJavaScript(`switchTab('${tab}');document.getElementById('panel-${tab}').innerText.length`);
@@ -72,7 +88,7 @@ app.on('browser-window-created',(_event,win)=>{
       await win.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
       if(await win.webContents.executeJavaScript('document.documentElement.scrollWidth > window.innerWidth'))throw Error('窄窗口横向溢出');
       console.log('PASS: 隔离与预加载、六个页签、报告期切换、CSV 写入、页面渲染');app.exit(0);
-    }catch(error){console.error(error);app.exit(1)}
+    }catch(error){console.error(error,errors.join('\n'));app.exit(1)}
   });
 });
 setTimeout(()=>{console.error('桌面测试超时');app.exit(1)},90000).unref();
