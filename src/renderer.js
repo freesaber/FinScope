@@ -74,22 +74,39 @@ function showData(data,cached=false){
   $('status').classList.toggle('err',cached);
   renderAll();
 }
-let historyExpanded=new Set();
+const HISTORY_PAGE_SIZE=20;
+const historyLimits={1:HISTORY_PAGE_SIZE,2:HISTORY_PAGE_SIZE,3:HISTORY_PAGE_SIZE};
+function historyCardMarkup(item,level){
+  const result=item.classification;
+  const reason=[...result.reasons,...result.missing].join('；')||'四组分析均可计算，未触发提示线';
+  const date=result.period?periodName(result.period):'报告期不完整';
+  const cached=new Date(item.fetchedAt).toLocaleString('zh-CN',{hour12:false});
+  return `<div class="history-card" data-record="${E(item.code)}" data-level="${level}"><button class="history-drag" data-drag="${E(item.code)}" draggable="true" aria-label="拖动排序 ${E(item.name)}，也可按上下方向键" title="拖动排序，也可按上下方向键">⠿</button><button class="history-remove" data-remove="${E(item.code)}" aria-label="删除 ${E(item.name)} 的查询记录及本地缓存" title="删除查询记录及本地缓存">删除</button><button class="history-company" data-code="${E(item.code)}" title="${E(reason)}；${E(date)}；缓存 ${E(cached)}"><span class="history-company-title"><b>${E(item.name)}</b><span>${E(item.code)}</span></span><span class="history-reason">${E(reason)}</span><span class="history-date">${E(date)} · 缓存 ${E(cached)}</span></button></div>`;
+}
+function historyPageNote(shown,total){return shown<total?`已显示 ${shown} / ${total} 家，继续向下滚动加载`:'';}
 function historyMarkup(list){
   if(!list.length)return '';
   return `<div class="history-header"><div><h3>查询分类 <span>${list.length} 家</span></h3><p>基于已缓存财报的研究筛选，不是买卖建议。点击公司重新查询。</p></div></div><div class="history-groups">`+[1,2,3].map(level=>{
     const items=list.filter(item=>item.classification?.level===level);
-    const expanded=historyExpanded.has(level);
-    const visible=expanded?items:items.slice(0,6);
+    const visible=items.slice(0,historyLimits[level]);
     const description=({1:'资料可评估，未触发当前筛选规则',2:'存在关注项，或信息尚不足',3:'触发需优先核查的重点线索'})[level];
-    return `<section class="history-group history-level-${level}"><div class="history-group-title"><strong>${Classification.labels[level]}</strong><span>${items.length}</span></div><p class="history-description">${description}</p><div class="history-items">${visible.map(item=>{
-      const result=item.classification;
-      const reason=[...result.reasons,...result.missing].join('；')||'四组分析均可计算，未触发提示线';
-      const date=result.period?periodName(result.period):'报告期不完整';
-      const cached=new Date(item.fetchedAt).toLocaleString('zh-CN',{hour12:false});
-      return `<div class="history-card" data-record="${E(item.code)}" data-level="${level}"><button class="history-drag" data-drag="${E(item.code)}" draggable="true" aria-label="拖动排序 ${E(item.name)}，也可按上下方向键" title="拖动排序，也可按上下方向键">⠿</button><button class="history-remove" data-remove="${E(item.code)}" aria-label="删除 ${E(item.name)} 的查询记录及本地缓存" title="删除查询记录及本地缓存">删除</button><button class="history-company" data-code="${E(item.code)}" title="${E(reason)}；${E(date)}；缓存 ${E(cached)}"><span class="history-company-title"><b>${E(item.name)}</b><span>${E(item.code)}</span></span><span class="history-reason">${E(reason)}</span><span class="history-date">${E(date)} · 缓存 ${E(cached)}</span></button></div>`;
-    }).join('')||'<div class="history-none">暂无公司</div>'}</div>${items.length>6?`<button class="history-more" data-expand="${level}">${expanded?'收起':'展开其余 '+(items.length-6)+' 家'}</button>`:''}</section>`;
+    return `<section class="history-group history-level-${level}"><div class="history-group-title"><strong>${Classification.labels[level]}</strong><span>${items.length}</span></div><p class="history-description">${description}</p><div class="history-items" data-history-level="${level}" tabindex="0" aria-label="${Classification.labels[level]}公司列表，可向下滚动加载">${visible.map(item=>historyCardMarkup(item,level)).join('')||'<div class="history-none">暂无公司</div>'}</div><div class="history-page-note" aria-live="polite">${historyPageNote(visible.length,items.length)}</div></section>`;
   }).join('')+'</div>';
+}
+function bindHistoryList(list){
+  bindHistoryControls(list);
+  $('history').querySelectorAll('[data-code]').forEach(button=>button.onclick=()=>{if($('search').disabled)return;$('stock').value=button.dataset.code;search()});
+  $('history').querySelectorAll('[data-history-level]').forEach(region=>region.onscroll=()=>{
+    if(historyMutation||region.scrollHeight-region.clientHeight-region.scrollTop>60)return;
+    const level=Number(region.dataset.historyLevel),items=list.filter(item=>item.classification.level===level),shown=region.querySelectorAll('.history-card').length;
+    const next=items.slice(shown,shown+HISTORY_PAGE_SIZE);
+    if(!next.length)return;
+    // 只追加下一页，保留原有节点、拖动状态和滚动位置。
+    region.insertAdjacentHTML('beforeend',next.map(item=>historyCardMarkup(item,level)).join(''));
+    historyLimits[level]=shown+next.length;
+    region.nextElementSibling.textContent=historyPageNote(historyLimits[level],items.length);
+    bindHistoryList(list);
+  });
 }
 async function showHistory(){
   try {
@@ -97,9 +114,7 @@ async function showHistory(){
     const list=await window.finscope.history();
     $('history').innerHTML=historyMarkup(list);
     $('history').querySelectorAll('.history-items').forEach((el,i)=>el.scrollTop=scrolls[i]||0);
-    bindHistoryControls(list);
-    $('history').querySelectorAll('[data-code]').forEach(button=>button.onclick=()=>{if($('search').disabled)return;$('stock').value=button.dataset.code;search()});
-    $('history').querySelectorAll('[data-expand]').forEach(button=>button.onclick=()=>{const level=Number(button.dataset.expand);historyExpanded.has(level)?historyExpanded.delete(level):historyExpanded.add(level);showHistory()});
+    bindHistoryList(list);
   }catch{ $('history').textContent='查询分类暂不可用'; }
 }
 async function search(){

@@ -25,34 +25,42 @@ app.on('browser-window-created',(_event,win)=>{
         }
         await win.webContents.executeJavaScript(`showData(${JSON.stringify(data)})`);
         const cacheDir=path.join(app.getPath('userData'),'reports');await fs.mkdir(cacheDir,{recursive:true});
-        for(let n=0;n<15;n++){
+        for(let n=0;n<67;n++){
           const sample=structuredClone(data);sample.stock={code:String(600100+n),secu:`${600100+n}.SH`};
           sample.b.forEach(r=>r.SECURITY_NAME_ABBR=`分类测试 ${n+1}`);
-          sample.i.forEach(r=>r.MINORITY_NETPROFIT=n<7?2e8:n<14?4e8:8e8);
+          sample.i.forEach(r=>r.MINORITY_NETPROFIT=n<45?2e8:n<66?4e8:8e8);
           sample.c.forEach(r=>r.NETCASH_OPERATE=20e8);
           await fs.writeFile(path.join(cacheDir,sample.stock.code+'.json'),JSON.stringify(sample));
         }
         await win.webContents.executeJavaScript('showHistory()');
         if(await win.webContents.executeJavaScript('Boolean(document.querySelector(".history-rules"))'))throw Error('分类依据入口未移除');
         const history=await win.webContents.executeJavaScript('window.finscope.history()');
-        if(history.length!==15)throw Error('历史查询仍被截断');
+        if(history.length!==67)throw Error('历史查询仍被截断');
         for(const level of [1,2,3])if(!history.some(x=>x.classification.level===level))throw Error('缺少分类：'+level);
-        await win.webContents.executeJavaScript('historyExpanded.add(1);showHistory()');
-        if(await win.webContents.executeJavaScript('document.querySelectorAll(".history-level-1 [data-code]").length')!==7)throw Error('分类展开数量错误');
+        if(await win.webContents.executeJavaScript('Boolean(document.querySelector("[data-expand],.history-more"))'))throw Error('展开收起按钮未移除');
+        if(await win.webContents.executeJavaScript('document.querySelectorAll(".history-level-1 [data-code]").length')!==20)throw Error('首批数量不是20条');
+        const scrollPage=`const region=document.querySelector('.history-level-1 .history-items');region.scrollTop=region.scrollHeight;region.dispatchEvent(new Event('scroll'));`;
+        await win.webContents.executeJavaScript(`{${scrollPage}}`);
+        if(await win.webContents.executeJavaScript('document.querySelectorAll(".history-level-1 [data-code]").length')!==40)throw Error('滚动没有加载第二页');
+        if(await win.webContents.executeJavaScript('document.querySelectorAll(".history-level-2 [data-code]").length')!==20)throw Error('分类分页相互干扰');
+        await win.webContents.executeJavaScript(`{${scrollPage}}`);
+        if(await win.webContents.executeJavaScript('document.querySelectorAll(".history-level-1 [data-code]").length')!==45)throw Error('末页数量错误');
+        await win.webContents.executeJavaScript(`{${scrollPage}}`);
+        if(await win.webContents.executeJavaScript('new Set([...document.querySelectorAll(".history-level-1 [data-code]")].map(el=>el.dataset.code)).size')!==45)throw Error('重复加载卡片');
         await win.webContents.executeJavaScript(`
-          const handle=document.querySelector('[data-drag="600106"]'),target=document.querySelector('[data-record="600100"]');
+          const handle=document.querySelector('[data-drag="600144"]'),target=document.querySelector('[data-record="600100"]');
           handle.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:new DataTransfer()}));
           target.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:new DataTransfer(),clientY:target.getBoundingClientRect().top+1}));
           target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:new DataTransfer(),clientY:target.getBoundingClientRect().top+1}));
         `);
         await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>historyMutation?setTimeout(check,20):resolve();check()})');
-        if((await win.webContents.executeJavaScript('window.finscope.history()'))[0].code!=='600106')throw Error('拖动排序未保存');
+        if((await win.webContents.executeJavaScript('window.finscope.history()'))[0].code!=='600144')throw Error('新加载卡片拖动排序未保存');
         await win.webContents.executeJavaScript('showHistory()');
-        if(await win.webContents.executeJavaScript('document.querySelector(".history-level-1 [data-code]").dataset.code')!=='600106')throw Error('重新读取后顺序丢失');
-        await win.webContents.executeJavaScript(`document.querySelector('[data-remove="600106"]').click()`);
+        if(await win.webContents.executeJavaScript('document.querySelector(".history-level-1 [data-code]").dataset.code')!=='600144')throw Error('重新读取后顺序丢失');
+        await win.webContents.executeJavaScript(`document.querySelector('[data-remove="600144"]').click()`);
         await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>historyMutation?setTimeout(check,20):resolve();check()})');
-        if((await win.webContents.executeJavaScript('window.finscope.history()')).length!==14)throw Error('删除没有更新分类数量');
-        if(await win.webContents.executeJavaScript('window.finscope.cached("600106")')!==null)throw Error('删除没有清除缓存');
+        if((await win.webContents.executeJavaScript('window.finscope.history()')).length!==66)throw Error('删除没有更新分类数量');
+        if(await win.webContents.executeJavaScript('window.finscope.cached("600144")')!==null)throw Error('删除没有清除缓存');
         if(await win.webContents.executeJavaScript('document.getElementById("search").disabled'))throw Error('删除或拖动误触查询');
         await win.webContents.executeJavaScript('document.querySelector(".history-drag").focus()');
       }
