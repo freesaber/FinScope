@@ -1,12 +1,15 @@
 const {app,dialog}=require('electron');
 const fs=require('node:fs/promises');
 const path=require('node:path');
+app.commandLine.appendSwitch('disable-features','CalculateNativeWinOcclusion');
 app.setPath('userData',path.join(app.getPath('temp'),'finscope-smoke-'+process.pid));
 const errors=[];
 app.on('web-contents-created',(_event,contents)=>{
   contents.on('console-message',details=>{if(details.level==='error')errors.push(details.message)});
 });
 app.on('browser-window-created',(_event,win)=>{
+  // 截图等待动画帧；被其他窗口遮挡时也需要继续渲染。
+  win.webContents.setBackgroundThrottling(false);
   win.webContents.once('did-finish-load',async()=>{
     try{
       if(win.isMaximizable()||win.isFullScreenable())throw Error('窗口仍允许最大化或全屏');
@@ -94,6 +97,19 @@ app.on('browser-window-created',(_event,win)=>{
       if(process.argv.includes('--live')){await fs.mkdir(path.join(__dirname,'../docs'),{recursive:true});await fs.copyFile(path.join(output,'overview.png'),path.join(__dirname,'../docs/desktop.png'));await fs.copyFile(path.join(output,'charts.png'),path.join(__dirname,'../docs/charts.png'));}
       await win.webContents.executeJavaScript("selectedPeriod=annual[0].date;renderAll();renderAll()");
       if(await win.webContents.executeJavaScript('document.querySelectorAll("#overview-view svg").length')!==3)throw Error('切换报告期后图表重复或缺失');
+      await win.webContents.executeJavaScript(`
+        raw.i.forEach(r=>{r.MINORITY_INTEREST=-260356103.45;r.MINORITY_NETPROFIT=-260356103.45;r.NETPROFIT=138194736.58;});
+        raw.b.forEach(r=>{r.MINORITY_EQUITY=852490976.62;r.TOTAL_EQUITY=12821134446.31;});
+        merge();selectedPeriod=annual[0].date;renderAll();switchTab('overview');
+      `);
+      for(const id of ['overview','minority']){
+        const content=await win.webContents.executeJavaScript(`document.getElementById('${id}-view').innerText`);
+        if(!content.includes('-2.60亿')||!content.includes('少数股东应占亏损')||!content.includes('不参与偏离倍数评级'))throw Error('亏损金额或解释未展示：'+id);
+      }
+      await win.webContents.executeJavaScript('document.querySelector(".ticker").scrollIntoView();new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      await fs.writeFile(path.join(output,'minority-loss.png'),(await win.webContents.capturePage()).toPNG());
+      await win.webContents.executeJavaScript('selectedPeriod=latest.date;renderAll();switchTab("minority")');
+      if(!await win.webContents.executeJavaScript('document.getElementById("minority-view").innerText.includes("-2.60亿")'))throw Error('季报切换后亏损金额丢失');
       win.setSize(850,900);
       await win.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
       if(await win.webContents.executeJavaScript('document.documentElement.scrollWidth > window.innerWidth'))throw Error('窄窗口横向溢出');

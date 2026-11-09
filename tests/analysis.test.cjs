@@ -4,6 +4,34 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const source=fs.readFileSync('src/fields.js','utf8')+'\n'+fs.readFileSync('src/insights.js','utf8')+'\n'+fs.readFileSync('src/renderer.js','utf8').split('document.querySelectorAll(\'.tab\').forEach(el=>el.onclick=')[0];
 function run(code){return vm.runInNewContext(source+'\n'+code);}
+test('少数股东倍数不适用时，总览和详情保留带符号金额并说明原因',()=>{
+  const html=JSON.parse(run(`
+    const views={'overview-view':{},'minority-view':{}};
+    globalThis.document={getElementById:id=>views[id]};
+    raw={financial:false};
+    reports=annual=[{date:'2025-12-31',b:{TOTAL_EQUITY:12821134446.31,MINORITY_EQUITY:852490976.62},i:{NETPROFIT:138194736.58,MINORITY_INTEREST:-260356103.45},c:null}];
+    selectedPeriod='2025-12-31';overview();minorityPage();
+    JSON.stringify([views['overview-view'].innerHTML,views['minority-view'].innerHTML])`));
+  for(const page of html){
+    assert.match(page,/少数股东损益<\/label><div class="value">-2.60亿/);
+    assert.match(page,/少数股东应占亏损/);
+    assert.match(page,/不参与偏离倍数评级/);
+    assert.doesNotMatch(page,/少数股东权益或利润缺失、为零或口径异常/);
+  }
+  assert.match(html[0],/可计算指标未触发初筛线索/);
+});
+test('少数股东金额展示区分亏损、缺字段、零分母，正常倍数仍沿用阈值',()=>{
+  const render=(b,i)=>run(`const r={b:${JSON.stringify(b)},i:${JSON.stringify(i)}};reports=[r];selectedPeriod='';minorityKpi('份额偏离倍数',r)`);
+  assert.match(render({TOTAL_EQUITY:100,MINORITY_EQUITY:10},{NETPROFIT:-1,MINORITY_INTEREST:1e8}),/合并亏损，少数股东应占盈利/);
+  assert.match(render({TOTAL_EQUITY:100,MINORITY_EQUITY:10},{NETPROFIT:0,MINORITY_INTEREST:0}),/合并净利润为零/);
+  assert.match(render({TOTAL_EQUITY:100,MINORITY_EQUITY:0},{NETPROFIT:10,MINORITY_INTEREST:0}),/少数股东权益不大于零/);
+  assert.match(render({TOTAL_EQUITY:100,MINORITY_EQUITY:10},{NETPROFIT:10}),/缺少：少数股东损益/);
+  assert.match(render({TOTAL_EQUITY:100},{NETPROFIT:10,MINORITY_INTEREST:-1e8}),/-1.00亿/);
+  assert.match(render({TOTAL_EQUITY:100},{NETPROFIT:10,MINORITY_INTEREST:-1e8}),/缺少：少数股东权益/);
+  assert.match(render({TOTAL_EQUITY:100,MINORITY_EQUITY:10},{NETPROFIT:100,MINORITY_INTEREST:40}),/4.00 倍/);
+  assert.match(render({TOTAL_EQUITY:100,MINORITY_EQUITY:10},{NETPROFIT:100,MINORITY_INTEREST:40}),/明显偏高/);
+  assert.match(render({TOTAL_EQUITY:100,MINORITY_EQUITY:10},{NETPROFIT:100,MINORITY_INTEREST:0}),/0.00 倍/);
+});
 test('参考分区边界与白话解读准确，倍数和缺失值清楚显示',()=>{
   assert.equal(run('times(4.18)'), '4.18 倍');
   assert.equal(run('metricAssessment("minority",1.5).label'),'未触发提示线');
