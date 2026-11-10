@@ -36,36 +36,47 @@ app.on('browser-window-created',(_event,win)=>{
           await fs.writeFile(path.join(cacheDir,sample.stock.code+'.json'),JSON.stringify(sample));
         }
         await win.webContents.executeJavaScript('showHistory()');
-        if(await win.webContents.executeJavaScript('Boolean(document.querySelector(".history-rules"))'))throw Error('分类依据入口未移除');
         const history=await win.webContents.executeJavaScript('window.finscope.history()');
         if(history.length!==67)throw Error('历史查询仍被截断');
         for(const level of [1,2,3])if(!history.some(x=>x.classification.level===level))throw Error('缺少分类：'+level);
-        if(await win.webContents.executeJavaScript('Boolean(document.querySelector("[data-expand],.history-more"))'))throw Error('展开收起按钮未移除');
-        if(await win.webContents.executeJavaScript('document.querySelectorAll(".history-level-1 [data-code]").length')!==20)throw Error('首批数量不是20条');
-        const scrollPage=`const region=document.querySelector('.history-level-1 .history-items');region.scrollTop=region.scrollHeight;region.dispatchEvent(new Event('scroll'));`;
-        await win.webContents.executeJavaScript(`{${scrollPage}}`);
-        if(await win.webContents.executeJavaScript('document.querySelectorAll(".history-level-1 [data-code]").length')!==40)throw Error('滚动没有加载第二页');
-        if(await win.webContents.executeJavaScript('document.querySelectorAll(".history-level-2 [data-code]").length')!==20)throw Error('分类分页相互干扰');
-        await win.webContents.executeJavaScript(`{${scrollPage}}`);
-        if(await win.webContents.executeJavaScript('document.querySelectorAll(".history-level-1 [data-code]").length')!==45)throw Error('末页数量错误');
-        await win.webContents.executeJavaScript(`{${scrollPage}}`);
-        if(await win.webContents.executeJavaScript('new Set([...document.querySelectorAll(".history-level-1 [data-code]")].map(el=>el.dataset.code)).size')!==45)throw Error('重复加载卡片');
+        if(await win.webContents.executeJavaScript('document.querySelectorAll("[data-tile]").length')!==67)throw Error('方块没有一次显示全部公司');
+        if(await win.webContents.executeJavaScript('Boolean(document.querySelector(".history-items"))'))throw Error('仍存在旧列表');
         await win.webContents.executeJavaScript(`
-          const handle=document.querySelector('[data-drag="600144"]'),target=document.querySelector('[data-record="600100"]');
-          handle.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:new DataTransfer()}));
-          target.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:new DataTransfer(),clientY:target.getBoundingClientRect().top+1}));
-          target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:new DataTransfer(),clientY:target.getBoundingClientRect().top+1}));
+          const tile=document.querySelector('[data-tile="600101"]'),target=document.querySelector('[data-tile="600100"]');
+          tile.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:new DataTransfer()}));
+          target.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:new DataTransfer(),clientX:target.getBoundingClientRect().left+1}));
+          target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:new DataTransfer(),clientX:target.getBoundingClientRect().left+1}));
         `);
         await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>historyMutation?setTimeout(check,20):resolve();check()})');
-        if((await win.webContents.executeJavaScript('window.finscope.history()'))[0].code!=='600144')throw Error('新加载卡片拖动排序未保存');
+        if((await win.webContents.executeJavaScript('window.finscope.history()'))[0].code!=='600101')throw Error('拖动顺序未保存');
         await win.webContents.executeJavaScript('showHistory()');
-        if(await win.webContents.executeJavaScript('document.querySelector(".history-level-1 [data-code]").dataset.code')!=='600144')throw Error('重新读取后顺序丢失');
-        await win.webContents.executeJavaScript(`document.querySelector('[data-remove="600144"]').click()`);
+        if(await win.webContents.executeJavaScript('document.querySelector("[data-tile]").dataset.tile')!=='600101')throw Error('重载后拖动顺序丢失');
+        await win.webContents.executeJavaScript(`document.querySelector('[data-tile="600101"]').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',altKey:true,bubbles:true,cancelable:true}))`);
         await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>historyMutation?setTimeout(check,20):resolve();check()})');
-        if((await win.webContents.executeJavaScript('window.finscope.history()')).length!==66)throw Error('删除没有更新分类数量');
-        if(await win.webContents.executeJavaScript('window.finscope.cached("600144")')!==null)throw Error('删除没有清除缓存');
-        if(await win.webContents.executeJavaScript('document.getElementById("search").disabled'))throw Error('删除或拖动误触查询');
-        await win.webContents.executeJavaScript('document.querySelector(".history-drag").focus()');
+        if(await win.webContents.executeJavaScript('document.querySelector("[data-tile]").dataset.tile')!=='600100')throw Error('键盘排序失败');
+        await win.webContents.executeJavaScript('document.querySelector(\'[data-map-filter="2"]\').click()');
+        if(await win.webContents.executeJavaScript('document.querySelectorAll("[data-tile]").length')!==21)throw Error('分类筛选失败');
+        await win.webContents.executeJavaScript('document.querySelector(\'[data-map-filter="0"]\').click();document.getElementById("history-find").value="600144";document.getElementById("history-find").dispatchEvent(new Event("input"))');
+        if(await win.webContents.executeJavaScript('document.querySelectorAll("[data-tile]").length')!==1)throw Error('代码定位失败');
+        await win.webContents.executeJavaScript('document.querySelector("[data-tile]").click()');
+        if(!await win.webContents.executeJavaScript('document.getElementById("history-detail").textContent.includes("分类测试 45")'))throw Error('点击未显示公司详情');
+        await win.webContents.executeJavaScript('document.getElementById("history-find").value="不存在";document.getElementById("history-find").dispatchEvent(new Event("input"))');
+        if(!await win.webContents.executeJavaScript('Boolean(document.querySelector(".map-no-match")) && !document.getElementById("history-remove")'))throw Error('空搜索仍展示过期操作');
+        await win.webContents.executeJavaScript('document.getElementById("history-find").value="";document.getElementById("history-find").dispatchEvent(new Event("input"));document.querySelector(\'[data-tile="600144"]\').click();document.getElementById("history-remove").click()');
+        await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>historyMutation?setTimeout(check,20):resolve();check()})');
+        if((await win.webContents.executeJavaScript('window.finscope.history()')).length!==66)throw Error('移除没有更新数量');
+        if(await win.webContents.executeJavaScript('window.finscope.cached("600144")')!==null)throw Error('移除没有清除缓存');
+        if(await win.webContents.executeJavaScript('document.querySelectorAll("[data-tile]").length')!==66)throw Error('移除未更新地图');
+        if(await win.webContents.executeJavaScript('document.getElementById("search").disabled'))throw Error('方块操作误触查询');
+        await win.webContents.executeJavaScript('document.getElementById("history-find").value="分类测试 6";document.getElementById("history-find").dispatchEvent(new Event("input"))');
+        if(await win.webContents.executeJavaScript('document.querySelectorAll("[data-tile]").length')!==9)throw Error('名称定位失败');
+        await win.webContents.executeJavaScript('document.getElementById("history-find").value="";document.getElementById("history-find").dispatchEvent(new Event("input"))');
+
+        await win.webContents.executeJavaScript('document.querySelector("[data-tile]").click();document.getElementById("history-open").click()');
+        await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>historyMutation?setTimeout(check,20):resolve();check()})');
+        if(await win.webContents.executeJavaScript('raw.stock.code')!=='600100')throw Error('打开财报没有读取所选缓存');
+        if(!await win.webContents.executeJavaScript('document.getElementById("status").textContent.includes("本地缓存")'))throw Error('没有标注缓存来源');
+
       }
       for(const tab of ['overview','minority','cash','working','debt','about']){
         const length=await win.webContents.executeJavaScript(`switchTab('${tab}');document.getElementById('panel-${tab}').innerText.length`);
@@ -113,7 +124,24 @@ app.on('browser-window-created',(_event,win)=>{
       win.setSize(850,900);
       await win.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
       if(await win.webContents.executeJavaScript('document.documentElement.scrollWidth > window.innerWidth'))throw Error('窄窗口横向溢出');
-      console.log('PASS: 隔离与预加载、六个页签、报告期切换、CSV 写入、页面渲染');app.exit(0);
+
+      if(!process.argv.includes('--live')){
+        await win.webContents.executeJavaScript(`(async()=>{
+          historyFilter=0;historyQuery='';
+          const all=await window.finscope.history();
+          const preview=[...all.filter(x=>x.classification.level===1).slice(0,6),...all.filter(x=>x.classification.level===2).slice(0,13),...all.filter(x=>x.classification.level===3)];
+          renderHistory(preview);document.querySelector('[data-tile]').click();
+          document.getElementById('history').scrollIntoView();
+        })()`);
+        await win.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+        await fs.writeFile(path.join(output,'tiles-narrow.png'),(await win.webContents.capturePage()).toPNG());
+        if(await win.webContents.executeJavaScript('document.documentElement.scrollWidth > window.innerWidth'))throw Error('地图窄窗口横向溢出');
+        win.setSize(1224,900);
+        await win.webContents.executeJavaScript('document.getElementById("history").scrollIntoView();new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+        await fs.writeFile(path.join(output,'tiles-preview.png'),(await win.webContents.capturePage()).toPNG());
+
+      }
+      console.log('PASS: 方块全量显示、拖动与键盘排序持久化、分类与搜索、缓存打开与移除、六个页签、报告期切换、CSV 写入');app.exit(0);
     }catch(error){console.error(error,errors.join('\n'));app.exit(1)}
   });
 });
