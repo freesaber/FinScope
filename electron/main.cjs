@@ -46,7 +46,7 @@ function registerHandlers() {
   });
 }
 function createWindow() {
-  window = new BrowserWindow({width: 1240, height: 900, minWidth: 820, minHeight: 640, maximizable: false, fullscreenable: false, title: 'FinScope · 财务透镜', backgroundColor: '#f6f7f8', icon: path.join(__dirname, '../assets/icon.ico'), webPreferences: {preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true}});
+  window = new BrowserWindow({width: 1240, height: 900, minWidth: 820, minHeight: 640, maximizable: true, fullscreenable: false, title: 'FinScope · 财务透镜', backgroundColor: '#f6f7f8', icon: path.join(__dirname, '../assets/icon.ico'), webPreferences: {preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true}});
   window.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
