@@ -78,10 +78,10 @@ $('export').onclick=async()=>{
 function clearResults(){
   raw=null;reports=[];annual=[];latest=null;chosen={};
   $('ticker').classList.add('hidden');
-  for(const id of ['overview','minority','cash','working','debt']) $(id+'-view').innerHTML='<div class="empty">暂无本次查询结果，请联网重试或读取本地缓存。</div>';
+  for(const id of ['overview','minority','cash','working','debt']) $(id+'-view').innerHTML='<div class="empty">暂无本次查询结果，请联网重新获取。</div>';
   debugPage();
 }
-function showData(data,cached=false){
+function showData(data){
   raw=data;chosen={};merge();
   if(!reports.length)throw Error('资产负债表和利润表无法按报告日期匹配');
   $('ticker').classList.remove('hidden');
@@ -89,30 +89,41 @@ function showData(data,cached=false){
   $('company').textContent=data.b[0]?.SECURITY_NAME_ABBR||data.i[0]?.SECURITY_NAME_ABBR||'上市公司';
   $('coverage').textContent=`${annual.length} 份年报${latest?' · 最新'+periodName(latest.date):''}`;
   const stamp=new Date(data.fetchedAt).toLocaleString('zh-CN',{hour12:false});
-  $('status').textContent=`${cached?'本地缓存 · 非实时数据':'联网查询成功'} · 获取于 ${stamp} · ${reports.length} 期配对财报。${(data.warnings||[]).join('')}`;
-  $('status').classList.toggle('err',cached);
+  $('status').textContent=`联网查询成功 · 获取于 ${stamp} · ${reports.length} 期配对财报。${(data.warnings||[]).join('')}`;
+  $('status').classList.remove('err');
   renderAll();
 }
-async function showHistory(){
-  try {renderHistory(await window.finscope.history());}
+async function showHistory(revealCode=''){
+  try {
+    const list=await window.finscope.history();
+    const item=list.find(item=>item.code===revealCode);
+    if(item){
+      historySelection=item.code;
+      if(historyFilter&&historyFilter!==item.classification.level)historyFilter=0;
+      const query=historyQuery.trim().toLowerCase();
+      if(query&&!`${item.name} ${item.code}`.toLowerCase().includes(query))historyQuery='';
+    }
+    renderHistory(list);
+    if(item)selectHistoryCompany(item.code);
+    if(item)$('history-map').querySelector(`[data-tile="${item.code}"]`)?.scrollIntoView({block:'nearest'});
+  }
   catch{ $('history').textContent='财务地图暂不可用'; }
 }
-async function search(){
+async function search(options={}){
   const stock=codeOf($('stock').value),status=$('status');
   if(!stock){status.textContent='请输入合法的六位A股代码，例如 600519、300750 或 000001。';status.classList.add('err');return}
   if($('search').disabled)return;
   clearResults();status.classList.remove('err');
   $('search').disabled=true;$('stock').disabled=true;$('search').textContent='查询中…';
   status.textContent='正在获取资产负债表、利润表与现金流量表…';
-  try {showData(await window.finscope.analyze(stock.secu));await showHistory();}
+  historyFetch={code:stock.code,state:'loading'};selectHistoryCompany(stock.code);
+  try {showData(await window.finscope.analyze(stock.secu));historyFetch={code:stock.code,state:'success'};await showHistory(stock.code);if(options.scroll){switchTab('overview');$('ticker').scrollIntoView({block:'start'});}return true;}
   catch(error){
     clearResults();status.classList.add('err');
+    historyFetch={code:stock.code,state:'failed',error:error.message};
     status.textContent='获取失败：'+error.message+'。请检查股票代码、网络连接或稍后重试。';
-    try {
-      const cached=await window.finscope.cached(stock.secu);
-      if(cached){const button=document.createElement('button');button.className='smallbtn';button.textContent='读取本地缓存（'+new Date(cached.fetchedAt).toLocaleString('zh-CN')+'）';button.onclick=()=>showData(cached,true);status.append(' ',button);}
-    }catch{}
-  }finally{$('search').disabled=false;$('stock').disabled=false;$('search').textContent='分析财报'}
+    return false;
+  }finally{$('search').disabled=false;$('stock').disabled=false;$('search').textContent='分析财报';drawHistoryDetail();}
 }
 $('search').onclick=search;
 $('stock').onkeydown=e=>{if(e.key==='Enter')search()};

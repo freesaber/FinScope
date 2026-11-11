@@ -1,7 +1,16 @@
 'use strict';
-let historyMutation=false,historyItems=[],historySelection='',historyQuery='',historyFilter=0,historyDrag=null;
+let historyMutation=false,historyItems=[],historySelection='',historyQuery='',historyFilter=0,historyDrag=null,historyFetch=null;
 const mapLabels={1:'未触发提示',2:'需要关注',3:'重点核查'};
 function historyMessage(message,error=false){$('status').textContent=message;$('status').classList.toggle('err',error);}
+function selectHistoryCompany(code){
+  historySelection=code;
+  $('history').querySelectorAll('[data-tile]').forEach(tile=>{
+    const selected=tile.dataset.tile===code;
+    tile.classList.toggle('selected',selected);
+    tile.setAttribute('aria-pressed',String(selected));
+  });
+  drawHistoryDetail();
+}
 function historyVisible(){
   const query=historyQuery.trim().toLowerCase();
   return historyItems.filter(item=>(!historyFilter||item.classification.level===historyFilter)&&(!query||`${item.name} ${item.code}`.toLowerCase().includes(query)));
@@ -10,7 +19,7 @@ function renderHistory(list){
   historyItems=[...list];
   if(!list.length){$('history').innerHTML='';historySelection='';return;}
   if(!list.some(item=>item.code===historySelection))historySelection='';
-  $('history').innerHTML=`<div class="history-header"><div><div class="map-eyebrow">WATCHLIST / FINANCIAL SIGNALS</div><h3>自选财务地图 <span>${list.length} 家</span></h3><p>点击方块查看线索，拖动调整同类公司的顺序，自动保存。</p></div><label class="map-find"><span>⌕</span><input id="history-find" type="search" placeholder="定位名称 / 代码" aria-label="定位公司名称或代码" value="${E(historyQuery)}"></label></div><div class="map-toolbar"><div class="map-filters" role="group" aria-label="筛选财务信号">${[0,1,2,3].map(level=>`<button data-map-filter="${level}" aria-pressed="${historyFilter===level}">${level?mapLabels[level]:'全部'} <span>${level?list.filter(item=>item.classification.level===level).length:list.length}</span></button>`).join('')}</div><span class="map-key">拖动排序 · Alt + 方向键也可调整</span></div><div id="history-detail" class="map-detail" aria-live="polite"></div><div id="history-map" class="stock-map"></div><div class="map-footnote">基于各公司最新缓存报告，报告期可能不同；黄色也可能表示资料不足或指标不适用。位置与大小不代表收益、估值或排名，筛选结果不构成买卖建议。</div>`;
+  $('history').innerHTML=`<div class="history-header"><div><div class="map-eyebrow">WATCHLIST / FINANCIAL SIGNALS</div><h3>自选财务地图 <span>${list.length} 家</span></h3><p>点击方块查看线索，拖动调整同类公司的顺序，自动保存。</p></div><label class="map-find"><span>⌕</span><input id="history-find" type="search" placeholder="定位名称 / 代码" aria-label="定位公司名称或代码" value="${E(historyQuery)}"></label></div><div class="map-toolbar"><div class="map-filters" role="group" aria-label="筛选财务信号">${[0,1,2,3].map(level=>`<button data-map-filter="${level}" aria-pressed="${historyFilter===level}">${level?mapLabels[level]:'全部'} <span>${level?list.filter(item=>item.classification.level===level).length:list.length}</span></button>`).join('')}</div><span class="map-key">拖动排序 · Alt + 方向键也可调整</span></div><div id="history-detail" class="map-detail" aria-live="polite"></div><div id="history-map" class="stock-map"></div><div class="map-footnote">地图展示上次联网查询摘要，点击公司会重新获取最新财报；报告期可能不同；黄色也可能表示资料不足或指标不适用。位置与大小不代表收益、估值或排名，筛选结果不构成买卖建议。</div>`;
   $('history-find').oninput=event=>{historyQuery=event.target.value;drawHistoryMap();};
   $('history').querySelectorAll('[data-map-filter]').forEach(button=>button.onclick=()=>{
     historyFilter=Number(button.dataset.mapFilter);
@@ -26,47 +35,54 @@ function drawHistoryMap(){
     return `<section class="stock-zone zone-${level}" aria-label="${mapLabels[level]}"><div class="zone-heading"><span class="zone-dot"></span><strong>${mapLabels[level]}</strong><span>${items.length}</span></div><p class="zone-description">${({1:'四组指标可评估，未触发提示线',2:'有关注线索 / 资料不足或不适用',3:'已触发需优先核查的重点线索'})[level]}</p><div class="tile-grid">${items.map(item=>{
       const result=item.classification,count=result.reasons.length;
       const hint=count?`${count} 条线索`:result.missing.length?'资料待核查':'未见提示';
-      return `<button class="stock-tile ${historySelection===item.code?'selected':''}" data-tile="${E(item.code)}" draggable="true" aria-pressed="${historySelection===item.code}" aria-label="${E(item.name)} ${E(item.code)}，${mapLabels[level]}，${hint}" title="${E(item.name)} · ${E([...result.reasons,...result.missing].join('；')||'未触发当前筛选规则')}"><span class="tile-grip" aria-hidden="true">⠿</span><b>${E(item.name)}</b><span>${E(item.code)}</span><small>${hint}</small></button>`;
+      return `<div class="tile-cell"><button class="stock-tile ${historySelection===item.code?'selected':''}" data-tile="${E(item.code)}" draggable="true" aria-pressed="${historySelection===item.code}" aria-label="${E(item.name)} ${E(item.code)}，${mapLabels[level]}，${hint}" title="${E(item.name)} · ${E([...result.reasons,...result.missing].join('；')||'未触发当前筛选规则')}"><span class="tile-grip" aria-hidden="true">⠿</span><b>${E(item.name)}</b><span>${E(item.code)}</span><small>${hint}</small></button><button class="tile-remove" data-remove-tile="${E(item.code)}" draggable="false" aria-label="删除 ${E(item.name)}" title="删除 ${E(item.name)}">×</button></div>`;
     }).join('')||'<span class="zone-empty">暂无公司</span>'}</div></section>`;
   }).join(''):'<div class="map-no-match">没有匹配的公司，试试其他名称、代码或分类。</div>';
-  $('history-map').querySelectorAll('[data-tile]').forEach(button=>button.onclick=()=>{
-    if(historyDrag)return;
-    historySelection=button.dataset.tile;
-    $('history-map').querySelectorAll('[data-tile]').forEach(el=>{const selected=el.dataset.tile===historySelection;el.classList.toggle('selected',selected);el.setAttribute('aria-pressed',String(selected));});
-    drawHistoryDetail();
+  $('history-map').querySelectorAll('[data-tile]').forEach(button=>button.onclick=async()=>{
+    if(historyDrag||historyMutation||$('search').disabled)return;
+    selectHistoryCompany(button.dataset.tile);
+    $('stock').value=historySelection;await search();
+  });
+  $('history-map').querySelectorAll('[data-remove-tile]').forEach(button=>{
+    button.onclick=event=>{event.preventDefault();event.stopPropagation();removeHistoryCompany(button.dataset.removeTile,button);};
+    button.ondragstart=event=>event.preventDefault();
   });
   bindTileDrag();
   drawHistoryDetail();
 }
 function drawHistoryDetail(){
+  if(!$('history-detail'))return;
   const item=historyVisible().find(item=>item.code===historySelection);
   if(!item){$('history-detail').innerHTML='<div class="map-detail-hint"><span>◎</span> 点击任意方块，查看财务线索与操作</div>';return;}
-  const result=item.classification,cached=new Date(item.fetchedAt).toLocaleString('zh-CN',{hour12:false});
-  $('history-detail').innerHTML=`<div class="map-detail-main"><div class="map-detail-title"><strong>${E(item.name)}</strong><span class="code">${E(item.code)}</span><span class="map-result result-${result.level}">${mapLabels[result.level]}</span></div><div class="map-detail-reasons">${result.reasons.length?`<ul>${result.reasons.map(reason=>`<li>${E(reason)}</li>`).join('')}</ul>`:'<p>未触发当前筛选规则。</p>'}${result.missing.length?`<p class="map-missing">资料边界：${E(result.missing.join('；'))}</p>`:''}</div><small>${E(periodName(result.period))} · 缓存 ${E(cached)}</small></div><div class="map-actions"><button class="smallbtn map-open" id="history-open">打开财报 ↗</button><button class="smallbtn map-delete" id="history-remove" aria-label="移除 ${E(item.name)} 并删除本地缓存">移除</button></div>`;
+  const result=item.classification,stamp=new Date(item.fetchedAt).toLocaleString('zh-CN',{hour12:false});
+  const fetchState=historyFetch?.code===item.code?historyFetch:null;
+  $('history-detail').innerHTML=`<div class="map-detail-main"><div class="map-detail-title"><strong>${E(item.name)}</strong><span class="code">${E(item.code)}</span><span class="map-result result-${result.level}">${mapLabels[result.level]}</span></div><div class="map-detail-reasons">${fetchState?.state==='loading'?'<p>正在联网获取最新财报…</p>':fetchState?.state==='failed'?`<p class="red">本次联网获取失败，请重试：${E(fetchState.error)}</p>`:`${result.reasons.length?`<ul>${result.reasons.map(reason=>`<li>${E(reason)}</li>`).join('')}</ul>`:'<p>未触发当前筛选规则。</p>'}${result.missing.length?`<p class="map-missing">资料边界：${E(result.missing.join('；'))}</p>`:''}`}</div><small>${E(periodName(result.period))} · 上次查询 ${E(stamp)}</small></div><div class="map-actions"><button class="smallbtn map-open" id="history-open">联网打开财报 ↗</button><button class="smallbtn map-delete" id="history-remove" aria-label="移除 ${E(item.name)}">移除</button></div>`;
+  $('history-open').disabled=$('search').disabled;
   $('history-open').onclick=async()=>{
     if(historyMutation||$('search').disabled)return;
-    historyMutation=true;$('history-open').disabled=true;
-    try{
-      const data=await window.finscope.cached(item.code);
-      if(!data)throw Error('本地缓存已不存在，请输入代码重新查询');
-      $('stock').value=item.code;showData(data,true);switchTab('overview');
-      $('ticker').scrollIntoView({block:'start'});
-    }catch(error){historyMessage('打开失败：'+error.message,true);}
-    finally{historyMutation=false;if($('history-open'))$('history-open').disabled=false;}
+    $('stock').value=item.code;await search({scroll:true});
   };
   $('history-remove').disabled=historyMutation;
-  $('history-remove').onclick=async()=>{
-    if(historyMutation||$('search').disabled)return;
-    historyMutation=true;$('history-remove').disabled=true;
-    try{
-      await window.finscope.removeHistory(item.code);
-      if(raw?.stock.code===item.code)clearResults();
-      historySelection='';await showHistory();
-      historyMessage(`已移除 ${item.name}，并删除查询记录及本地缓存。重新查询可再次添加。`);
-      ($('history-find')||$('stock')).focus({preventScroll:true});
-    }catch(error){historyMessage('移除失败：'+error.message,true);}
-    finally{historyMutation=false;if($('history-remove'))$('history-remove').disabled=false;}
-  };
+  $('history-remove').onclick=()=>removeHistoryCompany(item.code,$('history-remove'));
+}
+async function removeHistoryCompany(code,button){
+  if(historyMutation||$('search').disabled)return;
+  const item=historyItems.find(item=>item.code===code);
+  if(!item)return;
+  const visible=historyVisible(),index=visible.findIndex(item=>item.code===code);
+  const nextCode=(visible[index+1]||visible[index-1])?.code;
+  historyMutation=true;button.disabled=true;
+  try{
+    await window.finscope.removeHistory(code);
+    if(raw?.stock.code===code)clearResults();
+    if(historySelection===code)historySelection='';
+    if(historyFetch?.code===code)historyFetch=null;
+    await showHistory();
+    historyMessage(`已移除 ${item.name}及其查询记录。重新查询可再次添加。`);
+    const next=nextCode?$('history').querySelector(`[data-tile="${nextCode}"]`):null;
+    (next||$('history-find')||$('stock')).focus({preventScroll:true});
+  }catch(error){button.disabled=false;historyMessage('移除失败：'+error.message,true);}
+  finally{historyMutation=false;if($('history-remove'))$('history-remove').disabled=false;}
 }
 
 function resetTileDrag(){

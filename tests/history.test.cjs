@@ -27,3 +27,19 @@ test('跨分类拖动被拒绝；并发排序和删除按顺序落盘',async t=>
   await Promise.all([store.move('600102','600101',false),store.remove('600101')]);
   assert.deepEqual((await store.list()).map(x=>x.code),['600100','600102']);
 });
+
+
+test('仅持久化自选摘要，重启保留顺序且不保存报表正文',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'finscope-watchlist-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const store=createHistoryStore(root);
+  const data=code=>({stock:{code},fetchedAt:'2026-11-11',b:[{REPORT_DATE:'2025-12-31',SECURITY_NAME_ABBR:code}],i:[],c:[]});
+  await store.record(data('600100'));await store.record(data('600101'));
+  await store.move('600101','600100',false);
+  await store.record({...data('600100'),fetchedAt:'2026-11-12'});
+  const list=await createHistoryStore(root).list();
+  assert.deepEqual(list.map(x=>x.code),['600101','600100']);
+  assert.equal(list[1].fetchedAt,'2026-11-12');
+  const saved=JSON.parse(await fs.readFile(path.join(root,'watchlist.json'),'utf8'));
+  assert.ok(saved.every(item=>!('b' in item)&&!('i' in item)&&!('c' in item)));
+  await assert.rejects(()=>fs.access(path.join(root,'reports')),/ENOENT/);
+});

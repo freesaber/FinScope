@@ -1,4 +1,5 @@
-const {app,dialog}=require('electron');
+const {app,dialog,ipcMain}=require('electron');
+const {createHistoryStore}=require('../electron/history.cjs');
 const fs=require('node:fs/promises');
 const path=require('node:path');
 app.commandLine.appendSwitch('disable-features','CalculateNativeWinOcclusion');
@@ -28,13 +29,16 @@ app.on('browser-window-created',(_event,win)=>{
           data.c.push({REPORT_DATE:date,NETCASH_OPERATE:15e8});
         }
         await win.webContents.executeJavaScript(`showData(${JSON.stringify(data)})`);
-        const cacheDir=path.join(app.getPath('userData'),'reports');await fs.mkdir(cacheDir,{recursive:true});
+        const store=createHistoryStore(app.getPath('userData')),samples=new Map();
+        let requests=0,failRequests=false;
+        ipcMain.removeHandler('reports:load');
+        ipcMain.handle('reports:load',async(_event,code)=>{requests++;if(failRequests)throw Error('模拟联网失败');const sample=structuredClone(samples.get(code.slice(0,6)));sample.fetchedAt=new Date().toISOString();await store.record(sample);return sample;});
         for(let n=0;n<67;n++){
           const sample=structuredClone(data);sample.stock={code:String(600100+n),secu:`${600100+n}.SH`};
           sample.b.forEach(r=>r.SECURITY_NAME_ABBR=`分类测试 ${n+1}`);
           sample.i.forEach(r=>r.MINORITY_NETPROFIT=n<45?2e8:n<66?4e8:8e8);
           sample.c.forEach(r=>r.NETCASH_OPERATE=20e8);
-          await fs.writeFile(path.join(cacheDir,sample.stock.code+'.json'),JSON.stringify(sample));
+          samples.set(sample.stock.code,sample);await store.record(sample);
         }
         await win.webContents.executeJavaScript('showHistory()');
         const history=await win.webContents.executeJavaScript('window.finscope.history()');
@@ -59,24 +63,37 @@ app.on('browser-window-created',(_event,win)=>{
         if(await win.webContents.executeJavaScript('document.querySelectorAll("[data-tile]").length')!==21)throw Error('分类筛选失败');
         await win.webContents.executeJavaScript('document.querySelector(\'[data-map-filter="0"]\').click();document.getElementById("history-find").value="600144";document.getElementById("history-find").dispatchEvent(new Event("input"))');
         if(await win.webContents.executeJavaScript('document.querySelectorAll("[data-tile]").length')!==1)throw Error('代码定位失败');
-        await win.webContents.executeJavaScript('document.querySelector("[data-tile]").click()');
+        await win.webContents.executeJavaScript('(async()=>{await document.querySelector("[data-tile]").onclick()})()');
         if(!await win.webContents.executeJavaScript('document.getElementById("history-detail").textContent.includes("分类测试 45")'))throw Error('点击未显示公司详情');
         await win.webContents.executeJavaScript('document.getElementById("history-find").value="不存在";document.getElementById("history-find").dispatchEvent(new Event("input"))');
         if(!await win.webContents.executeJavaScript('Boolean(document.querySelector(".map-no-match")) && !document.getElementById("history-remove")'))throw Error('空搜索仍展示过期操作');
-        await win.webContents.executeJavaScript('document.getElementById("history-find").value="";document.getElementById("history-find").dispatchEvent(new Event("input"));document.querySelector(\'[data-tile="600144"]\').click();document.getElementById("history-remove").click()');
+        await win.webContents.executeJavaScript('(async()=>{document.getElementById("history-find").value="";document.getElementById("history-find").dispatchEvent(new Event("input"));await document.querySelector(\'[data-tile="600144"]\').onclick();document.getElementById("history-remove").click()})()');
         await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>historyMutation?setTimeout(check,20):resolve();check()})');
         if((await win.webContents.executeJavaScript('window.finscope.history()')).length!==66)throw Error('移除没有更新数量');
-        if(await win.webContents.executeJavaScript('window.finscope.cached("600144")')!==null)throw Error('移除没有清除缓存');
+        if(await win.webContents.executeJavaScript('typeof window.finscope.cached')!=='undefined')throw Error('仍暴露旧缓存接口');
         if(await win.webContents.executeJavaScript('document.querySelectorAll("[data-tile]").length')!==66)throw Error('移除未更新地图');
         if(await win.webContents.executeJavaScript('document.getElementById("search").disabled'))throw Error('方块操作误触查询');
         await win.webContents.executeJavaScript('document.getElementById("history-find").value="分类测试 6";document.getElementById("history-find").dispatchEvent(new Event("input"))');
         if(await win.webContents.executeJavaScript('document.querySelectorAll("[data-tile]").length')!==9)throw Error('名称定位失败');
         await win.webContents.executeJavaScript('document.getElementById("history-find").value="";document.getElementById("history-find").dispatchEvent(new Event("input"))');
 
-        await win.webContents.executeJavaScript('document.querySelector("[data-tile]").click();document.getElementById("history-open").click()');
+        const beforeRequests=requests;
+        await win.webContents.executeJavaScript('(async()=>{await document.querySelector("[data-tile]").onclick();await document.getElementById("history-open").onclick()})()');
+        if(requests-beforeRequests!==2)throw Error('点击公司和打开财报没有分别联网');
         await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>historyMutation?setTimeout(check,20):resolve();check()})');
-        if(await win.webContents.executeJavaScript('raw.stock.code')!=='600100')throw Error('打开财报没有读取所选缓存');
-        if(!await win.webContents.executeJavaScript('document.getElementById("status").textContent.includes("本地缓存")'))throw Error('没有标注缓存来源');
+        if(await win.webContents.executeJavaScript('raw.stock.code')!=='600100')throw Error('打开财报未联网获取所选公司');
+        if(!await win.webContents.executeJavaScript('historySelection===raw.stock.code && document.querySelector(".stock-tile.selected").dataset.tile===raw.stock.code'))throw Error('查询公司与地图选中状态不一致');
+
+        if(!await win.webContents.executeJavaScript('document.getElementById("status").textContent.includes("联网查询成功")'))throw Error('没有标注联网来源');
+        await win.webContents.executeJavaScript('document.getElementById("stock").value="600101";search()');
+        if(!await win.webContents.executeJavaScript('document.querySelectorAll(".stock-tile.selected").length===1 && document.querySelector(".stock-tile.selected").dataset.tile==="600101" && historySelection===raw.stock.code'))throw Error('输入框查询未统一卡片勾选');
+        await win.webContents.executeJavaScript('document.getElementById("stock").value="600100";search()');
+        failRequests=true;
+        await win.webContents.executeJavaScript('document.getElementById("history-open").onclick()');
+        if(!await win.webContents.executeJavaScript('raw===null && document.getElementById("status").textContent.includes("获取失败")'))throw Error('联网失败仍显示旧财报');
+        failRequests=false;
+        await win.webContents.executeJavaScript('document.getElementById("history-open").onclick()');
+
 
       }
       for(const tab of ['overview','minority','cash','working','debt','about']){
@@ -92,10 +109,6 @@ app.on('browser-window-created',(_event,win)=>{
       dialog.showSaveDialog=async()=>({canceled:false,filePath:csvPath});
       await win.webContents.executeJavaScript("window.finscope.exportCSV(raw.stock.code,csvContent())");
       if(!(await fs.readFile(csvPath,'utf8')).startsWith('\ufeff"报告期"'))throw Error('CSV 文件写入失败');
-      if(process.argv.includes('--live')){
-        const cached=await win.webContents.executeJavaScript('window.finscope.cached(raw.stock.code)');
-        if(cached.stock.code!=='600771')throw Error('本地缓存读取失败');
-      }
       if(errors.length)throw Error(errors.join('\n'));
       await win.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
       const output=path.join(__dirname,'../test-results');await fs.mkdir(output,{recursive:true});
@@ -122,7 +135,7 @@ app.on('browser-window-created',(_event,win)=>{
       await fs.writeFile(path.join(output,'minority-loss.png'),(await win.webContents.capturePage()).toPNG());
       await win.webContents.executeJavaScript('selectedPeriod=latest.date;renderAll();switchTab("minority")');
       if(!await win.webContents.executeJavaScript('document.getElementById("minority-view").innerText.includes("-2.60亿")'))throw Error('季报切换后亏损金额丢失');
-      win.setSize(850,900);
+      win.setSize(960,720);
       await win.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
       if(await win.webContents.executeJavaScript('document.documentElement.scrollWidth > window.innerWidth'))throw Error('窄窗口横向溢出');
 
@@ -131,7 +144,7 @@ app.on('browser-window-created',(_event,win)=>{
           historyFilter=0;historyQuery='';
           const all=await window.finscope.history();
           const preview=[...all.filter(x=>x.classification.level===1).slice(0,6),...all.filter(x=>x.classification.level===2).slice(0,13),...all.filter(x=>x.classification.level===3)];
-          renderHistory(preview);document.querySelector('[data-tile]').click();
+          historySelection=preview[0].code;renderHistory(preview);
           document.getElementById('history').scrollIntoView();
         })()`);
         await win.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
@@ -142,7 +155,7 @@ app.on('browser-window-created',(_event,win)=>{
         await fs.writeFile(path.join(output,'tiles-preview.png'),(await win.webContents.capturePage()).toPNG());
 
       }
-      console.log('PASS: 方块全量显示、拖动与键盘排序持久化、分类与搜索、缓存打开与移除、六个页签、报告期切换、CSV 写入');app.exit(0);
+      console.log('PASS: 方块全量显示、拖动与键盘排序持久化、分类与搜索、联网打开与移除、六个页签、报告期切换、CSV 写入');app.exit(0);
     }catch(error){console.error(error,errors.join('\n'));app.exit(1)}
   });
 });

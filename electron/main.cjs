@@ -7,11 +7,6 @@ const {loadReports, stockCode} = require('./data.cjs');
 const {createHistoryStore} = require('./history.cjs');
 const page = path.join(__dirname, '../src/index.html');
 let window;
-const cacheFile = code => path.join(app.getPath('userData'), 'reports', `${stockCode(code).code}.json`);
-async function readCache(code) {
-  try { return JSON.parse(await fs.readFile(cacheFile(code), 'utf8')); }
-  catch (error) { if (error.code === 'ENOENT') return null; throw new Error('本地缓存损坏，请重新联网查询'); }
-}
 function trusted(event) {
   if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== pathToFileURL(page).href) throw new Error('请求来源无效');
 }
@@ -21,14 +16,10 @@ function registerHandlers() {
     trusted(event);
     const data = await loadReports(code, net.fetch);
     try {
-      const file = cacheFile(code);
-      await fs.mkdir(path.dirname(file), {recursive: true});
-      await fs.writeFile(file + '.tmp', JSON.stringify(data), 'utf8');
-      await fs.rename(file + '.tmp', file);
-    } catch { data.warnings.push('本次查询成功，但本地缓存写入失败。'); }
+      await history.record(data);
+    } catch { data.warnings.push('本次查询成功，但自选名单保存失败。'); }
     return data;
   });
-  ipcMain.handle('reports:cached', (event, code) => { trusted(event); return readCache(code); });
   ipcMain.handle('reports:history', async event => {
     trusted(event);
     return history.list();
@@ -46,7 +37,7 @@ function registerHandlers() {
   });
 }
 function createWindow() {
-  window = new BrowserWindow({width: 1240, height: 900, minWidth: 820, minHeight: 640, maximizable: true, fullscreenable: false, title: 'FinScope · 财务透镜', backgroundColor: '#f6f7f8', icon: path.join(__dirname, '../assets/icon.ico'), webPreferences: {preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true}});
+  window = new BrowserWindow({width: 1240, height: 900, minWidth: 960, minHeight: 720, maximizable: true, fullscreenable: false, title: 'FinScope · 财务透镜', backgroundColor: '#f6f7f8', icon: path.join(__dirname, '../assets/icon.ico'), webPreferences: {preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true}});
   window.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));

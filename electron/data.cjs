@@ -17,7 +17,7 @@ async function fetchSheet(report, stock, request = fetch) {
   let lastError;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const response = await request(`${API}?${params}`, {signal: AbortSignal.timeout(15000), redirect: 'error'});
+      const response = await request(`${API}?${params}`, {cache:'no-store', signal: AbortSignal.timeout(15000), redirect: 'error'});
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const body = await response.json();
       if (body.success === false) throw new Error(body.message || '数据服务拒绝请求');
@@ -41,14 +41,14 @@ async function loadReports(input, request = fetch) {
   if (!selected.length) throw new Error('没有可用的报告期');
   const code = stock.secu.split('.')[1] + stock.code;
   const base = 'https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/';
-  const page = await request(`${base}Index?type=web&code=${code}`, {signal: AbortSignal.timeout(15000), redirect:'error'});
+  const page = await request(`${base}Index?type=web&code=${code}`, {cache:'no-store', signal: AbortSignal.timeout(15000), redirect:'error'});
   if (!page.ok) throw new Error(`公司报表类型识别失败：HTTP ${page.status}`);
   const html = await page.text();
   const companyType = html.match(/id="hidctype"[^>]*value="([1-4])"/)?.[1];
   if (!companyType) throw new Error('无法识别公司报表类型，数据服务页面可能已调整');
   const full = async endpoint => {
     const params = new URLSearchParams({companyType, reportDateType:'0', reportType:'1', dates:selected.join(','), code});
-    const response = await request(`${base}${endpoint}?${params}`, {signal:AbortSignal.timeout(20000), redirect:'error'});
+    const response = await request(`${base}${endpoint}?${params}`, {cache:'no-store', signal:AbortSignal.timeout(20000), redirect:'error'});
     if (!response.ok) throw new Error(`完整报表请求失败：HTTP ${response.status}`);
     const body = await response.json();
     if (!Array.isArray(body.data) || !body.data.length) throw new Error('完整报表暂无数据');
