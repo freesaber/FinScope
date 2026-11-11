@@ -25,7 +25,7 @@ function parseTencent(body,stock){
   const cap=index=>{const n=numeric(f[index]);return n===null?null:n*1e8;};
   return {code:stock.code,name:text(f[1]),price:numeric(f[3]),changePercent:numeric(f[32]),peTTM:numeric(f[39]),peDynamic:numeric(f[52]),pb:numeric(f[46]),marketCap:cap(45),floatMarketCap:cap(44),industry:null,region:null,listedAt:null,quotedAt:date&&Number.isFinite(Date.parse(date))?new Date(date).toISOString():null,fetchedAt:new Date().toISOString(),source:'腾讯行情'};
 }
-async function loadMarket(input,request=fetch,alternateRequest=request){
+async function loadMarket(input,request=fetch,alternateRequest=request,{priceOnly=false}={}){
   const stock=stockCode(input);
   const params=new URLSearchParams({secid:`${stock.secu.endsWith('.SH')?'1':'0'}.${stock.code}`,fltt:'2',invt:'2',fields:'f43,f57,f58,f86,f116,f117,f127,f128,f162,f164,f167,f170,f189'});
   const eastmoney=`https://push2.eastmoney.com/api/qt/stock/get?${params}`;
@@ -42,7 +42,7 @@ async function loadMarket(input,request=fetch,alternateRequest=request){
       const result=route.parse(body,stock);
       if(!(result.price>0)&&!(result.marketCap>0))throw Error('行情返回空数据');
       if(!partial)partial=result;
-      if(result.peTTM!==null&&result.peTTM!==0)return result;
+      if(priceOnly&&result.price>0||result.peTTM!==null&&result.peTTM!==0)return result;
     }catch(error){lastError=error;}
   }
   if(partial)return partial;

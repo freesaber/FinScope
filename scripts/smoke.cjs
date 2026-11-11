@@ -1,5 +1,6 @@
 const {app,dialog,ipcMain,shell}=require('electron');
 const {createHistoryStore}=require('../electron/history.cjs');
+const {createPriceMonitor}=require('../electron/price-monitor.cjs');
 const fs=require('node:fs/promises');
 const path=require('node:path');
 app.commandLine.appendSwitch('disable-features','CalculateNativeWinOcclusion');
@@ -15,6 +16,7 @@ app.on('browser-window-created',(_event,win)=>{
   win.webContents.setBackgroundThrottling(false);
   win.webContents.once('did-finish-load',async()=>{
     try{
+      let demoMonitor;
       if(!win.isMaximizable())throw Error('窗口未允许最大化');
       if(win.isFullScreenable())throw Error('窗口不应允许全屏');
       const security=await win.webContents.executeJavaScript('({node:typeof require,bridge:typeof window.finscope?.analyze})');
@@ -33,6 +35,12 @@ app.on('browser-window-created',(_event,win)=>{
         await win.webContents.executeJavaScript(`showData(${JSON.stringify(data)})`);
         const store=createHistoryStore(app.getPath('userData')),samples=new Map();
         let requests=0,failRequests=false,holdRequests=false,releaseRequest;
+        demoMonitor=createPriceMonitor({root:app.getPath('userData'),listStocks:()=>store.list(),quotePrice:async code=>({price:code==='600100'?9:30,source:'模拟行情',quotedAt:new Date().toISOString()}),onChange:state=>win.webContents.send('monitor:state',state)});
+        for(const channel of ['monitor:get','monitor:save','monitor:toggle'])ipcMain.removeHandler(channel);
+        ipcMain.handle('monitor:get',()=>demoMonitor.getState());
+        ipcMain.handle('monitor:save',(_event,targets)=>demoMonitor.save(targets));
+        ipcMain.handle('monitor:toggle',(_event,value)=>demoMonitor.setEnabled(value));
+
         ipcMain.removeHandler('reports:load');
         ipcMain.handle('reports:load',async(_event,code)=>{requests++;if(holdRequests)await new Promise(resolve=>releaseRequest=resolve);if(failRequests)throw Error('模拟联网失败');const sample=structuredClone(samples.get(code.slice(0,6)));sample.fetchedAt=new Date().toISOString();await store.record(sample);return sample;});
         for(let n=0;n<67;n++){
@@ -109,6 +117,26 @@ app.on('browser-window-created',(_event,win)=>{
 
 
       }
+
+      if(demoMonitor){
+        await win.webContents.executeJavaScript('openTargetSettings()');
+        if(await win.webContents.executeJavaScript('document.querySelectorAll("[data-target-row]").length')!==66)throw Error('设置表未包含全部自选股');
+        await win.webContents.executeJavaScript(`
+          for(const code of ['600100','600101']){
+            const row=document.querySelector('[data-target-row="'+code+'"]');
+            const buy=row.querySelector('[data-target-buy]'),sell=row.querySelector('[data-target-sell]');
+            buy.value='10';buy.dispatchEvent(new Event('input'));sell.value='20';sell.dispatchEvent(new Event('input'));
+          }
+          document.getElementById('target-form').onsubmit({preventDefault(){}});
+        `);
+        await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>document.getElementById("target-save").disabled?setTimeout(check,10):resolve();check()})');
+        if(await win.webContents.executeJavaScript('document.getElementById("target-dialog").open'))throw Error('目标价保存未关闭弹框');
+        await win.webContents.executeJavaScript('document.getElementById("monitor-toggle").onclick()');
+        await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>monitorState.running||!monitorState.prices["600101"]?setTimeout(check,10):resolve();check()})');
+        if(!await win.webContents.executeJavaScript('Boolean(document.querySelector(\'[data-tile="600100"]\').parentElement.querySelector(".price-alert")) && document.querySelector(\'[data-tile="600101"]\').parentElement.classList.contains("price-sell")'))throw Error('目标价买卖提示未显示');
+        await win.webContents.executeJavaScript('document.getElementById("monitor-toggle").onclick()');
+        if(await win.webContents.executeJavaScript('Boolean(document.querySelector(".price-alert"))'))throw Error('关闭监控未清除提示');
+      }
       for(const tab of ['overview','minority','cash','working','debt','about']){
         const length=await win.webContents.executeJavaScript(`switchTab('${tab}');document.getElementById('panel-${tab}').innerText.length`);
         if(length<80)throw Error('模块未渲染：'+tab);
@@ -166,9 +194,19 @@ app.on('browser-window-created',(_event,win)=>{
         win.setSize(1224,900);
         await win.webContents.executeJavaScript('document.getElementById("history").scrollIntoView();new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
         await fs.writeFile(path.join(output,'tiles-preview.png'),(await win.webContents.capturePage()).toPNG());
+        if(demoMonitor){
+          await demoMonitor.setEnabled(true);
+          await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>monitorState.running||!monitorState.prices["600101"]?setTimeout(check,10):resolve();check()})');
+          await fs.writeFile(path.join(output,'monitor-cards.png'),(await win.webContents.capturePage()).toPNG());
+          await win.webContents.executeJavaScript('openTargetSettings()');
+          await win.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+          await fs.writeFile(path.join(output,'monitor-settings.png'),(await win.webContents.capturePage()).toPNG());
+          await demoMonitor.setEnabled(false);
+        }
+
 
       }
-      console.log('PASS: 方块全量显示、拖动与键盘排序持久化、分类与搜索、联网查询、东方财富跳转与移除、六个页签、报告期切换、CSV 写入');app.exit(0);
+      console.log('PASS: 自选卡片与拖动、目标价表格保存、监控开关与买卖提示、查询与导出、六个页签');app.exit(0);
     }catch(error){console.error(error,errors.join('\n'));app.exit(1)}
   });
 });

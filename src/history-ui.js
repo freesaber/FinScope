@@ -49,6 +49,7 @@ function drawHistoryMap(){
   });
   bindTileDrag();
   drawHistoryDetail();
+  if(typeof paintMonitorCards==='function')paintMonitorCards();
 }
 function drawHistoryDetail(){
   if(!$('history-detail'))return;

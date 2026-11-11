@@ -6,13 +6,20 @@ const {pathToFileURL} = require('node:url');
 const {loadReports, stockCode} = require('./data.cjs');
 const {createHistoryStore} = require('./history.cjs');
 const {loadMarket} = require('./market.cjs');
+const {createPriceMonitor}=require('./price-monitor.cjs');
 const page = path.join(__dirname, '../src/index.html');
-let window;
+let window,priceMonitor;
 function trusted(event) {
   if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== pathToFileURL(page).href) throw new Error('请求来源无效');
 }
 function registerHandlers() {
   const history=createHistoryStore(app.getPath('userData'));
+  priceMonitor=createPriceMonitor({root:app.getPath('userData'),listStocks:()=>history.list(),quotePrice:code=>loadMarket(code,fetch,net.fetch,{priceOnly:true}),onChange:state=>{
+    if(window&&!window.isDestroyed()&&!window.webContents.isDestroyed())window.webContents.send('monitor:state',state);
+  }});
+  ipcMain.handle('monitor:get',event=>{trusted(event);return priceMonitor.getState();});
+  ipcMain.handle('monitor:save',(event,targets)=>{trusted(event);return priceMonitor.save(targets);});
+  ipcMain.handle('monitor:toggle',(event,value)=>{trusted(event);return priceMonitor.setEnabled(value);});
   ipcMain.handle('reports:load', async (event, code) => {
     trusted(event);
     const [reports,market]=await Promise.allSettled([loadReports(code,net.fetch),loadMarket(code,fetch,net.fetch)]);
@@ -34,7 +41,7 @@ function registerHandlers() {
     const stock=stockCode(code),exchange=stock.secu.split('.')[1].toLowerCase();
     await shell.openExternal(`https://quote.eastmoney.com/${exchange}${stock.code}.html`);
   });
-  ipcMain.handle('reports:remove', (event, code) => {trusted(event);return history.remove(code);});
+  ipcMain.handle('reports:remove', async(event, code) => {trusted(event);await history.remove(code);await priceMonitor.remove(stockCode(code).code);});
   ipcMain.handle('reports:move', (event, code, target, after) => {trusted(event);return history.move(code,target,after);});
   ipcMain.handle('reports:export', async (event, code, content) => {
     trusted(event);
@@ -55,6 +62,7 @@ function createWindow() {
   window.loadFile(page);
   Menu.setApplicationMenu(Menu.buildFromTemplate([{label: 'FinScope', submenu: [{role: 'reload', label: '重新加载'}, {role: 'resetZoom', label: '重置缩放'}, {role: 'zoomIn', label: '放大'}, {role: 'zoomOut', label: '缩小'}, {type: 'separator'}, {role: 'quit', label: '退出'}]}, {label: '编辑', submenu: [{role: 'copy', label: '复制'}, {role: 'paste', label: '粘贴'}, {role: 'selectAll', label: '全选'}]}]));
 }
+app.on('before-quit',()=>priceMonitor?.dispose());
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { if (window) { if (window.isMinimized()) window.restore(); window.focus(); } });
