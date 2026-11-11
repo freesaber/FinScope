@@ -78,8 +78,21 @@ $('export').onclick=async()=>{
 function clearResults(){
   raw=null;reports=[];annual=[];latest=null;chosen={};
   $('ticker').classList.add('hidden');
+  $('company-profile').classList.add('hidden');
+  $('company-profile').innerHTML='';
   for(const id of ['overview','minority','cash','working','debt']) $(id+'-view').innerHTML='<div class="empty">暂无本次查询结果，请联网重新获取。</div>';
   debugPage();
+}
+function renderCompanyProfile(){
+  const view=$('company-profile'),m=raw?.market;
+  view.classList.remove('hidden');
+  const amount=n=>n===null||n===undefined?'—':n>=1e12?fmt(n/1e12)+' 万亿':fmt(n/1e8)+' 亿';
+  const multiple=n=>n===null||n===undefined||n===0?'—':fmt(n)+' 倍';
+  const metric=(label,value,note='',tone='')=>`<div class="profile-metric"><span>${label}</span><strong class="${tone}">${E(value)}</strong><small>${E(note)}</small></div>`;
+  const pe=m?.peTTM,pb=m?.pb,change=m?.changePercent;
+  const stamp=value=>new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+  const timestamp=m?(m.quotedAt?`行情时间 ${stamp(m.quotedAt)}`:`行情时间未提供 · 获取于 ${stamp(m.fetchedAt)}`):'';
+  view.innerHTML=`<div class="profile-top"><strong>行情与估值</strong><span>${E(timestamp)}</span></div><div class="profile-metrics">${metric('最新价（元）',m?.price>0?fmt(m.price):'—','查询时的最新报价')}${metric('涨跌幅',change===null||change===undefined?'—':`${change>0?'+':''}${fmt(change)}%`,'相对上一交易日收盘',change>0?'red':change<0?'green':'')}${metric('市盈率（TTM）',multiple(pe),pe<0?'亏损，估值比较不适用':'最近四个季度盈利口径')}${metric('市净率（PB）',multiple(pb),pb<0?'净资产为负，比较不适用':'股价 / 每股净资产')}${metric('总市值',amount(m?.marketCap),'人民币')}${metric('流通市值',amount(m?.floatMarketCap),'人民币')}</div><div class="profile-basics"><span>行业 <b>${E(m?.industry||'—')}</b></span><span>地区 <b>${E(m?.region||'—')}</b></span><span>上市日期 <b>${E(m?.listedAt||'—')}</b></span><span>交易所 <b>${E(raw.stock.secu.endsWith('.SH')?'上交所':raw.stock.secu.endsWith('.SZ')?'深交所':'北交所')}</b></span></div><div class="profile-note">${m?`来源：${E(m.source||'行情接口')} · 随查询更新，可能存在行情延迟；非交易时段通常为最近交易报价。`:'行情与基本信息暂不可用，财报分析仍可正常使用。'}${m?' 市盈率仅供估值参考，不参与上方财务分类。':''}${m&&!m.industry?' 当前数据源未提供行业、地区或上市日期。':''}</div>`;
 }
 function showData(data){
   raw=data;chosen={};merge();
@@ -91,7 +104,7 @@ function showData(data){
   const stamp=new Date(data.fetchedAt).toLocaleString('zh-CN',{hour12:false});
   $('status').textContent=`联网查询成功 · 获取于 ${stamp} · ${reports.length} 期配对财报。${(data.warnings||[]).join('')}`;
   $('status').classList.remove('err');
-  renderAll();
+  renderCompanyProfile();renderAll();
 }
 async function showHistory(revealCode=''){
   try {
@@ -109,21 +122,31 @@ async function showHistory(revealCode=''){
   }
   catch{ $('history').textContent='财务地图暂不可用'; }
 }
+function setQueryLoading(active,code){
+  $('query-loading').classList.toggle('hidden',!active);
+  if(active)$('query-loading-text').textContent=`正在查询 ${code} · 获取最新财报与行情…`;
+  $('history').querySelectorAll('[data-tile]').forEach(tile=>tile.setAttribute('aria-busy',String(active&&tile.dataset.tile===code)));
+  for(const id of ['overview','minority','cash','working','debt']){
+    const view=$(id+'-view');view.setAttribute('aria-busy',String(active));
+    if(active)view.innerHTML='<div class="query-placeholder" aria-hidden="true"></div>';
+  }
+}
 async function search(options={}){
   const stock=codeOf($('stock').value),status=$('status');
   if(!stock){status.textContent='请输入合法的六位A股代码，例如 600519、300750 或 000001。';status.classList.add('err');return}
   if($('search').disabled)return;
   clearResults();status.classList.remove('err');
-  $('search').disabled=true;$('stock').disabled=true;$('search').textContent='查询中…';
+  $('search').disabled=true;$('stock').disabled=true;$('search').textContent='分析财报';
   status.textContent='正在获取资产负债表、利润表与现金流量表…';
   historyFetch={code:stock.code,state:'loading'};selectHistoryCompany(stock.code);
+  setQueryLoading(true,stock.code);
   try {showData(await window.finscope.analyze(stock.secu));historyFetch={code:stock.code,state:'success'};await showHistory(stock.code);if(options.scroll){switchTab('overview');$('ticker').scrollIntoView({block:'start'});}return true;}
   catch(error){
     clearResults();status.classList.add('err');
     historyFetch={code:stock.code,state:'failed',error:error.message};
     status.textContent='获取失败：'+error.message+'。请检查股票代码、网络连接或稍后重试。';
     return false;
-  }finally{$('search').disabled=false;$('stock').disabled=false;$('search').textContent='分析财报';drawHistoryDetail();}
+  }finally{setQueryLoading(false,stock.code);$('search').disabled=false;$('stock').disabled=false;$('search').textContent='分析财报';drawHistoryDetail();}
 }
 $('search').onclick=search;
 $('stock').onkeydown=e=>{if(e.key==='Enter')search()};

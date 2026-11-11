@@ -56,11 +56,14 @@ function drawHistoryDetail(){
   if(!item){$('history-detail').innerHTML='<div class="map-detail-hint"><span>◎</span> 点击任意方块，查看财务线索与操作</div>';return;}
   const result=item.classification,stamp=new Date(item.fetchedAt).toLocaleString('zh-CN',{hour12:false});
   const fetchState=historyFetch?.code===item.code?historyFetch:null;
-  $('history-detail').innerHTML=`<div class="map-detail-main"><div class="map-detail-title"><strong>${E(item.name)}</strong><span class="code">${E(item.code)}</span><span class="map-result result-${result.level}">${mapLabels[result.level]}</span></div><div class="map-detail-reasons">${fetchState?.state==='loading'?'<p>正在联网获取最新财报…</p>':fetchState?.state==='failed'?`<p class="red">本次联网获取失败，请重试：${E(fetchState.error)}</p>`:`${result.reasons.length?`<ul>${result.reasons.map(reason=>`<li>${E(reason)}</li>`).join('')}</ul>`:'<p>未触发当前筛选规则。</p>'}${result.missing.length?`<p class="map-missing">资料边界：${E(result.missing.join('；'))}</p>`:''}`}</div><small>${E(periodName(result.period))} · 上次查询 ${E(stamp)}</small></div><div class="map-actions"><button class="smallbtn map-open" id="history-open">联网打开财报 ↗</button><button class="smallbtn map-delete" id="history-remove" aria-label="移除 ${E(item.name)}">移除</button></div>`;
-  $('history-open').disabled=$('search').disabled;
+  $('history-detail').innerHTML=`<div class="map-detail-main"><div class="map-detail-title"><strong>${E(item.name)}</strong><span class="code">${E(item.code)}</span><span class="map-result result-${result.level}">${mapLabels[result.level]}</span></div><div class="map-detail-reasons">${fetchState?.state==='loading'?'<p class="muted">最新线索将在查询完成后显示。</p>':fetchState?.state==='failed'?`<p class="red">本次联网获取失败，请重试：${E(fetchState.error)}</p>`:`${result.reasons.length?`<ul>${result.reasons.map(reason=>`<li>${E(reason)}</li>`).join('')}</ul>`:'<p>未触发当前筛选规则。</p>'}${result.missing.length?`<p class="map-missing">资料边界：${E(result.missing.join('；'))}</p>`:''}`}</div><small>${E(periodName(result.period))} · 上次查询 ${E(stamp)}</small></div><div class="map-actions"><button class="smallbtn map-open" id="history-open" title="使用默认浏览器打开东方财富行情页" aria-label="在东方财富查看 ${E(item.name)} 行情">东方财富 ↗</button><button class="smallbtn map-delete" id="history-remove" aria-label="移除 ${E(item.name)}">移除</button></div>`;
   $('history-open').onclick=async()=>{
-    if(historyMutation||$('search').disabled)return;
-    $('stock').value=item.code;await search({scroll:true});
+    const button=$('history-open');
+    if(button.disabled)return;
+    button.disabled=true;
+    try{await window.finscope.openQuote(item.code);}
+    catch(error){historyMessage('打开东方财富失败：'+error.message,true);}
+    finally{button.disabled=false;}
   };
   $('history-remove').disabled=historyMutation;
   $('history-remove').onclick=()=>removeHistoryCompany(item.code,$('history-remove'));

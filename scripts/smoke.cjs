@@ -1,10 +1,12 @@
-const {app,dialog,ipcMain}=require('electron');
+const {app,dialog,ipcMain,shell}=require('electron');
 const {createHistoryStore}=require('../electron/history.cjs');
 const fs=require('node:fs/promises');
 const path=require('node:path');
 app.commandLine.appendSwitch('disable-features','CalculateNativeWinOcclusion');
 app.setPath('userData',path.join(app.getPath('temp'),'finscope-smoke-'+process.pid));
 const errors=[];
+let openedQuote='';
+shell.openExternal=async url=>{openedQuote=url;};
 app.on('web-contents-created',(_event,contents)=>{
   contents.on('console-message',details=>{if(details.level==='error')errors.push(details.message)});
 });
@@ -30,9 +32,9 @@ app.on('browser-window-created',(_event,win)=>{
         }
         await win.webContents.executeJavaScript(`showData(${JSON.stringify(data)})`);
         const store=createHistoryStore(app.getPath('userData')),samples=new Map();
-        let requests=0,failRequests=false;
+        let requests=0,failRequests=false,holdRequests=false,releaseRequest;
         ipcMain.removeHandler('reports:load');
-        ipcMain.handle('reports:load',async(_event,code)=>{requests++;if(failRequests)throw Error('模拟联网失败');const sample=structuredClone(samples.get(code.slice(0,6)));sample.fetchedAt=new Date().toISOString();await store.record(sample);return sample;});
+        ipcMain.handle('reports:load',async(_event,code)=>{requests++;if(holdRequests)await new Promise(resolve=>releaseRequest=resolve);if(failRequests)throw Error('模拟联网失败');const sample=structuredClone(samples.get(code.slice(0,6)));sample.fetchedAt=new Date().toISOString();await store.record(sample);return sample;});
         for(let n=0;n<67;n++){
           const sample=structuredClone(data);sample.stock={code:String(600100+n),secu:`${600100+n}.SH`};
           sample.b.forEach(r=>r.SECURITY_NAME_ABBR=`分类测试 ${n+1}`);
@@ -41,6 +43,16 @@ app.on('browser-window-created',(_event,win)=>{
           samples.set(sample.stock.code,sample);await store.record(sample);
         }
         await win.webContents.executeJavaScript('showHistory()');
+        holdRequests=true;
+        await win.webContents.executeJavaScript('document.getElementById("stock").value="600100";globalThis.loadingRequest=search();void 0');
+        if(!await win.webContents.executeJavaScript('!document.getElementById("query-loading").classList.contains("hidden") && !document.querySelector("#history .spinner,#search .spinner,.analysis-loading,.stock-tile.loading") && document.querySelector(\'[data-tile="600100"]\').getAttribute("aria-busy")==="true"'))throw Error('等待请求时未显示加载状态');
+        await fs.mkdir(path.join(__dirname,'../test-results'),{recursive:true});
+        await win.webContents.executeJavaScript('document.getElementById("overview-view").scrollIntoView();new Promise(resolve=>requestAnimationFrame(resolve))');
+        await fs.writeFile(path.join(__dirname,'../test-results/query-loading.png'),(await win.webContents.capturePage()).toPNG());
+        await new Promise(resolve=>{const check=()=>releaseRequest?resolve():setTimeout(check,10);check()});
+        holdRequests=false;releaseRequest();
+        await win.webContents.executeJavaScript('globalThis.loadingRequest');
+        if(!await win.webContents.executeJavaScript('document.getElementById("query-loading").classList.contains("hidden") && !document.querySelector(".stock-tile.loading")'))throw Error('查询结束后加载状态未清理');
         const history=await win.webContents.executeJavaScript('window.finscope.history()');
         if(history.length!==67)throw Error('历史查询仍被截断');
         for(const level of [1,2,3])if(!history.some(x=>x.classification.level===level))throw Error('缺少分类：'+level);
@@ -79,7 +91,8 @@ app.on('browser-window-created',(_event,win)=>{
 
         const beforeRequests=requests;
         await win.webContents.executeJavaScript('(async()=>{await document.querySelector("[data-tile]").onclick();await document.getElementById("history-open").onclick()})()');
-        if(requests-beforeRequests!==2)throw Error('点击公司和打开财报没有分别联网');
+        if(requests-beforeRequests!==1)throw Error('东方财富按钮重复查询了财报');
+        if(openedQuote!=='https://quote.eastmoney.com/sh600100.html')throw Error('东方财富地址或浏览器调用错误');
         await win.webContents.executeJavaScript('new Promise(resolve=>{const check=()=>historyMutation?setTimeout(check,20):resolve();check()})');
         if(await win.webContents.executeJavaScript('raw.stock.code')!=='600100')throw Error('打开财报未联网获取所选公司');
         if(!await win.webContents.executeJavaScript('historySelection===raw.stock.code && document.querySelector(".stock-tile.selected").dataset.tile===raw.stock.code'))throw Error('查询公司与地图选中状态不一致');
@@ -89,10 +102,10 @@ app.on('browser-window-created',(_event,win)=>{
         if(!await win.webContents.executeJavaScript('document.querySelectorAll(".stock-tile.selected").length===1 && document.querySelector(".stock-tile.selected").dataset.tile==="600101" && historySelection===raw.stock.code'))throw Error('输入框查询未统一卡片勾选');
         await win.webContents.executeJavaScript('document.getElementById("stock").value="600100";search()');
         failRequests=true;
-        await win.webContents.executeJavaScript('document.getElementById("history-open").onclick()');
+        await win.webContents.executeJavaScript('search()');
         if(!await win.webContents.executeJavaScript('raw===null && document.getElementById("status").textContent.includes("获取失败")'))throw Error('联网失败仍显示旧财报');
         failRequests=false;
-        await win.webContents.executeJavaScript('document.getElementById("history-open").onclick()');
+        await win.webContents.executeJavaScript('search()');
 
 
       }
@@ -155,7 +168,7 @@ app.on('browser-window-created',(_event,win)=>{
         await fs.writeFile(path.join(output,'tiles-preview.png'),(await win.webContents.capturePage()).toPNG());
 
       }
-      console.log('PASS: 方块全量显示、拖动与键盘排序持久化、分类与搜索、联网打开与移除、六个页签、报告期切换、CSV 写入');app.exit(0);
+      console.log('PASS: 方块全量显示、拖动与键盘排序持久化、分类与搜索、联网查询、东方财富跳转与移除、六个页签、报告期切换、CSV 写入');app.exit(0);
     }catch(error){console.error(error,errors.join('\n'));app.exit(1)}
   });
 });

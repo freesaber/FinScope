@@ -1,10 +1,11 @@
 'use strict';
-const {app, BrowserWindow, ipcMain, dialog, Menu, net} = require('electron');
+const {app, BrowserWindow, ipcMain, dialog, Menu, net, shell} = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 const {loadReports, stockCode} = require('./data.cjs');
 const {createHistoryStore} = require('./history.cjs');
+const {loadMarket} = require('./market.cjs');
 const page = path.join(__dirname, '../src/index.html');
 let window;
 function trusted(event) {
@@ -14,7 +15,11 @@ function registerHandlers() {
   const history=createHistoryStore(app.getPath('userData'));
   ipcMain.handle('reports:load', async (event, code) => {
     trusted(event);
-    const data = await loadReports(code, net.fetch);
+    const [reports,market]=await Promise.allSettled([loadReports(code,net.fetch),loadMarket(code,fetch,net.fetch)]);
+    if(reports.status==='rejected')throw reports.reason;
+    const data=reports.value;
+    data.market=market.status==='fulfilled'?market.value:null;
+    data.marketError=market.status==='rejected'?'行情与基本信息暂时获取失败，请重新查询。':null;
     try {
       await history.record(data);
     } catch { data.warnings.push('本次查询成功，但自选名单保存失败。'); }
@@ -23,6 +28,11 @@ function registerHandlers() {
   ipcMain.handle('reports:history', async event => {
     trusted(event);
     return history.list();
+  });
+  ipcMain.handle('reports:openQuote',async(event,code)=>{
+    trusted(event);
+    const stock=stockCode(code),exchange=stock.secu.split('.')[1].toLowerCase();
+    await shell.openExternal(`https://quote.eastmoney.com/${exchange}${stock.code}.html`);
   });
   ipcMain.handle('reports:remove', (event, code) => {trusted(event);return history.remove(code);});
   ipcMain.handle('reports:move', (event, code, target, after) => {trusted(event);return history.move(code,target,after);});
