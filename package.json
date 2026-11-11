@@ -1,6 +1,6 @@
 {
   "name": "finscope",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "FinScope 财务透镜：上市公司财报透视与风险线索分析客户端",
   "main": "electron/main.cjs",
   "author": "FinScope contributors",
