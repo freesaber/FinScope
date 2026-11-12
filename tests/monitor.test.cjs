@@ -31,11 +31,12 @@ test('目标价边界包含等号，缺价格不触发，阻止冲突目标及�
 });
 test('开启立即查价，按60秒轮询，离开目标区间与报价失败都清除提醒',async t=>{
   let price=9,error=false,calls=0;
-  const f=await fixture(t,async()=>{calls++;if(error)throw Error('offline');return {price,source:'测试'};});
+  const f=await fixture(t,async()=>{calls++;if(error)throw Error('offline');return {price,changePercent:-1.25,source:'测试'};});
   await f.monitor.save([{code:'600100',buy:10,sell:20,enabled:true},{code:'600101',buy:10,sell:null,enabled:false}]);
   await f.monitor.setEnabled(true);
   let state=await until(f.monitor,s=>!s.running&&s.lastCheckedAt);
-  assert.equal(calls,1);assert.equal(state.prices['600100'].signal,'buy');assert.equal(f.timers.size,1);
+  assert.equal(calls,4);assert.equal(state.prices['600100'].signal,'buy');
+  assert.equal(state.prices['600101'].signal,null);assert.equal(state.prices['600102'].price,9);assert.equal(state.prices['600102'].changePercent,-1.25);assert.equal(f.timers.size,1);
   price=15;f.next();state=await until(f.monitor,s=>!s.running);assert.equal(state.prices['600100'].signal,null);
   price=20;f.next();state=await until(f.monitor,s=>!s.running);assert.equal(state.prices['600100'].signal,'sell');
   error=true;f.next();state=await until(f.monitor,s=>!s.running);assert.equal(state.prices['600100'].price,null);assert.equal(state.prices['600100'].signal,null);assert.ok(state.prices['600100'].error);
@@ -48,7 +49,11 @@ test('只保存目标配置，重启默认关闭，移除公司同步清理目�
   const state=await reopened.getState();assert.equal(state.enabled,false);assert.equal(state.targets[0].buy,10);
   assert.deepEqual(Object.keys(JSON.parse(await fs.readFile(path.join(f.root,'price-targets.json'),'utf8'))),['targets']);
   await f.monitor.remove('600100');assert.equal((await f.monitor.getState()).targets.length,0);
-  await assert.rejects(()=>f.monitor.setEnabled(true),/先设置/);reopened.dispose();
+  await f.monitor.setEnabled(true);
+  const refreshed=await until(f.monitor,state=>!state.running&&state.lastCheckedAt);
+  assert.equal(Object.keys(refreshed.prices).length,4);assert.ok(Object.values(refreshed.prices).every(quote=>quote.signal===null));
+  await f.monitor.setEnabled(false);f.stocks.length=0;
+  await assert.rejects(()=>f.monitor.setEnabled(true),/先查询/);reopened.dispose();
 });
 test('最大并发3只，关闭时丢弃正在请求的响应，不留下动画或下一轮',async t=>{
   const pending=[];let active=0,max=0,calls=0;

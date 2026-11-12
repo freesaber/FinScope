@@ -104,6 +104,7 @@ function showData(data){
   const stamp=new Date(data.fetchedAt).toLocaleString('zh-CN',{hour12:false});
   $('status').textContent=`联网查询成功 · 获取于 ${stamp} · ${reports.length} 期配对财报。${(data.warnings||[]).join('')}`;
   $('status').classList.remove('err');
+  if(typeof rememberCardQuote==='function')rememberCardQuote(data);
   renderCompanyProfile();renderAll();
 }
 async function showHistory(revealCode=''){

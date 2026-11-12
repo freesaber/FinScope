@@ -1,12 +1,30 @@
 'use strict';
-let monitorState={enabled:false,running:false,targets:[],prices:{}},monitorBusy=false,settingsRows=[];
+let monitorState={enabled:false,running:false,targets:[],prices:{}},monitorBusy=false,settingsRows=[],targetScrollPosition=null;
+const manualCardQuotes=new Map();
+function rememberCardQuote(data){
+  if(data?.market?.price>0)manualCardQuotes.set(data.stock.code,data.market);
+}
+function getCardQuote(code){
+  const manual=manualCardQuotes.get(code)||(raw?.stock.code===code?raw.market:null);
+  const polled=monitorState.prices[code];
+  if(!polled)return manual;
+  if(manual&&Date.parse(manual.fetchedAt)>Date.parse(polled.checkedAt||0))return manual;
+  return polled;
+}
+function cardPriceSignal(code){
+  const target=monitorState.targets.find(target=>target.code===code),quote=getCardQuote(code);
+  if(!monitorState.enabled||!target?.enabled||quote?.error||!(quote?.price>0))return null;
+  if(target.buy!==null&&quote.price<=target.buy)return 'buy';
+  if(target.sell!==null&&quote.price>=target.sell)return 'sell';
+  return null;
+}
 function monitorRowState(code){
-  const target=monitorState.targets.find(target=>target.code===code),quote=monitorState.prices[code];
+  const target=monitorState.targets.find(target=>target.code===code),quote=getCardQuote(code);
   if(!target?.enabled)return {text:'未监控',tone:''};
   if(!monitorState.enabled)return {text:'已配置 · 未开启',tone:''};
   if(quote?.error)return {text:'报价失败 · 将重试',tone:'error'};
-  if(quote?.signal==='buy')return {text:'已到买入价',tone:'buy'};
-  if(quote?.signal==='sell')return {text:'已到卖出价',tone:'sell'};
+  if(cardPriceSignal(code)==='buy')return {text:'已到买入价',tone:'buy'};
+  if(cardPriceSignal(code)==='sell')return {text:'已到卖出价',tone:'sell'};
   return {text:quote?'监控中':'等待报价',tone:'active'};
 }
 function paintMonitorCards(){
@@ -14,14 +32,23 @@ function paintMonitorCards(){
   document.querySelectorAll('.tile-cell').forEach(cell=>{
     const tile=cell.querySelector('[data-tile]');if(!tile)return;
     const code=tile.dataset.tile,target=configured.get(code),quote=monitorState.prices[code];
-    const signal=monitorState.enabled&&target?.enabled&&!quote?.error?quote?.signal:null;
+    const displayed=getCardQuote(code),price=tile.querySelector('.quote-price'),change=tile.querySelector('.quote-change');
+    if(price&&change){
+      price.textContent=displayed?.price>0?displayed.price.toFixed(2):'—';
+      const percent=displayed?.changePercent;
+      change.textContent=Number.isFinite(percent)?`${percent>0?'+':''}${percent.toFixed(2)}%`:'—';
+      change.classList.toggle('quote-up',percent>0);change.classList.toggle('quote-down',percent<0);
+      const time=displayed?.quotedAt||displayed?.checkedAt||displayed?.fetchedAt;
+      tile.querySelector('.tile-quote').title=displayed?.error?displayed.error:displayed?`${displayed.source||'行情'}${time?' · '+new Date(time).toLocaleString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}):''}${!monitorState.enabled?' · 监控关闭，报价不自动刷新':''}`:'开启监控后每 60 秒更新';
+    }
+    const signal=cardPriceSignal(code);
     cell.classList.toggle('price-buy',signal==='buy');cell.classList.toggle('price-sell',signal==='sell');
     let badge=cell.querySelector('.price-alert');
     if(signal){
       if(!badge){badge=document.createElement('span');badge.className='price-alert';cell.append(badge);}
       badge.textContent=signal==='buy'?'买':'卖';
       badge.setAttribute('aria-label',signal==='buy'?'当前价已达到买入目标':'当前价已达到卖出目标');
-      badge.title=`最近价 ${quote.price.toFixed(2)} 元 · ${quote.source||'行情'}${quote.quotedAt?' · '+new Date(quote.quotedAt).toLocaleString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}):''}`;
+      badge.title=`最近价 ${displayed.price.toFixed(2)} 元 · ${displayed.source||'行情'}${displayed.quotedAt?' · '+new Date(displayed.quotedAt).toLocaleString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}):''}`;
     }else badge?.remove();
     let dot=cell.querySelector('.monitor-dot');
     if(monitorState.enabled&&target?.enabled){
@@ -36,16 +63,16 @@ function applyMonitorState(state){
   const button=$('monitor-toggle'),count=state.targets.filter(target=>target.enabled).length;
   button.setAttribute('aria-checked',String(state.enabled));
   button.setAttribute('aria-label',state.enabled?'关闭价格监控':'开启价格监控');
-  $('monitor-toggle-label').textContent=state.enabled?`监控中 · ${count} 只`:'监控关闭';
+  $('monitor-toggle-label').textContent=state.enabled?'监控中':'监控关闭';
   const checked=state.lastCheckedAt?new Date(state.lastCheckedAt).toLocaleTimeString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}):'尚未完成';
-  button.title=state.enabled?`每 60 秒更新 · 上轮完成 ${checked}${state.running?' · 正在刷新报价':''}`:'开启后立即查询，之后每 60 秒更新价格';
+  button.title=state.enabled?`全部自选股每 60 秒更新 · ${count} 只设置触价提醒 · 上轮完成 ${checked}${state.running?' · 正在刷新报价':''}`:'开启后立即查询，之后每 60 秒更新全部自选股价格';
   paintMonitorCards();
   if($('target-dialog').open)paintTargetQuotes();
 }
 function paintTargetQuotes(){
   $('target-rows').querySelectorAll('[data-target-row]').forEach(row=>{
     const code=row.dataset.targetRow,quote=monitorState.prices[code],state=monitorRowState(code);
-    const current=quote?.price??(raw?.stock.code===code?raw.market?.price:null);
+    const current=getCardQuote(code)?.price;
     row.querySelector('.target-current').textContent=current>0?current.toFixed(2):'—';
     const status=row.querySelector('.target-row-status');status.textContent=state.text;status.className='target-row-status '+state.tone;
   });
@@ -76,11 +103,21 @@ async function openTargetSettings(){
       });
     });
     paintTargetQuotes();updateTargetCount();
-    if(!$('target-dialog').open)$('target-dialog').showModal();
+    if(!$('target-dialog').open){
+      targetScrollPosition={left:window.scrollX,top:window.scrollY};
+      document.documentElement.classList.add('target-modal-open');
+      try{$('target-dialog').showModal();}
+      catch(error){document.documentElement.classList.remove('target-modal-open');targetScrollPosition=null;throw error;}
+    }
   }catch(error){historyMessage('目标价设置打开失败：'+error.message,true);}
   finally{monitorBusy=false;$('target-settings').disabled=false;}
 }
 $('target-settings').onclick=openTargetSettings;
+$('target-dialog').addEventListener('close',()=>{
+  document.documentElement.classList.remove('target-modal-open');
+  const position=targetScrollPosition;targetScrollPosition=null;
+  if(position)window.scrollTo({...position,behavior:'instant'});
+});
 for(const id of ['target-close','target-cancel'])$(id).onclick=()=>{if(!$('target-save').disabled)$('target-dialog').close();};
 $('target-dialog').addEventListener('cancel',event=>{if($('target-save').disabled)event.preventDefault();});
 $('target-dialog').onclick=event=>{if(event.target===$('target-dialog')&&!$('target-save').disabled){const r=event.target.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)event.target.close();}};
@@ -105,7 +142,6 @@ $('target-form').onsubmit=async event=>{
 };
 $('monitor-toggle').onclick=async()=>{
   if(monitorBusy)return;
-  if(!monitorState.enabled&&!monitorState.targets.some(target=>target.enabled)){await openTargetSettings();return;}
   monitorBusy=true;$('monitor-toggle').disabled=true;
   try{applyMonitorState(await window.finscope.toggleMonitor(!monitorState.enabled));}
   catch(error){historyMessage('监控切换失败：'+error.message,true);}

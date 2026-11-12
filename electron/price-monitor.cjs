@@ -64,7 +64,8 @@ function createPriceMonitor({root,listStocks,quotePrice,onChange=()=>{},now=Date
     publish();
     try{
       const current=new Set((await listStocks()).map(item=>item.code));
-      const queue=targets.filter(target=>target.enabled&&current.has(target.code));
+      const configured=new Map(targets.map(target=>[target.code,target]));
+      const queue=[...current].map(code=>configured.get(code)||{code,enabled:false,buy:null,sell:null});
       if(!queue.length){stop();return;}
       let index=0;
       await Promise.all(Array.from({length:Math.min(3,queue.length)},async()=>{
@@ -74,7 +75,7 @@ function createPriceMonitor({root,listStocks,quotePrice,onChange=()=>{},now=Date
             const quote=await quotePrice(target.code);
             if(!enabled||version!==generation)return;
             if(!(quote.price>0)||!Number.isFinite(quote.price))throw Error('没有有效报价');
-            prices[target.code]={price:quote.price,signal:priceSignal(quote.price,target),source:quote.source,quotedAt:quote.quotedAt||null,checkedAt:new Date(now()).toISOString(),error:null};
+            prices[target.code]={price:quote.price,changePercent:Number.isFinite(quote.changePercent)?quote.changePercent:null,signal:priceSignal(quote.price,target),source:quote.source,quotedAt:quote.quotedAt||null,checkedAt:new Date(now()).toISOString(),error:null};
           }catch{
             if(!enabled||version!==generation)return;
             prices[target.code]={price:null,signal:null,checkedAt:new Date(now()).toISOString(),error:'本次报价失败，下轮自动重试'};
@@ -84,7 +85,7 @@ function createPriceMonitor({root,listStocks,quotePrice,onChange=()=>{},now=Date
       }));
       if(version===generation)lastCheckedAt=new Date(now()).toISOString();
     }catch{
-      if(version===generation)for(const target of targets.filter(target=>target.enabled))prices[target.code]={price:null,signal:null,error:'本轮查询失败，下轮自动重试'};
+      if(version===generation)for(const code of Object.keys(prices))prices[code]={price:null,signal:null,error:'本轮查询失败，下轮自动重试'};
     }finally{
       running=false;
       // 设置或开关在请求期间变化时，旧响应不再生效，新一轮立即开始。
@@ -107,7 +108,6 @@ function createPriceMonitor({root,listStocks,quotePrice,onChange=()=>{},now=Date
       targets=next;
       try{await persist();}catch(error){targets=previous;throw error;}
       generation++;prices={};clearTimer();
-      if(!targets.some(target=>target.enabled))enabled=false;
       publish();if(enabled)void tick();return snapshot();
     }),
     setEnabled:value=>serialized(async()=>{
@@ -115,14 +115,14 @@ function createPriceMonitor({root,listStocks,quotePrice,onChange=()=>{},now=Date
       if(typeof value!=='boolean')throw Error('监控开关状态无效');
       if(!value){stop();return snapshot();}
       const allowed=new Set((await listStocks()).map(item=>item.code));
-      if(!targets.some(target=>target.enabled&&allowed.has(target.code)))throw Error('请先设置目标价并勾选要监控的公司');
+      if(!allowed.size)throw Error('请先查询公司，加入自选名单后开启监控');
       if(!enabled){enabled=true;generation++;prices={};publish();void tick();}
       return snapshot();
     }),
     remove:code=>serialized(async()=>{
       await ready();targets=targets.filter(target=>target.code!==code);delete prices[code];
       generation++;clearTimer();await persist();
-      if(!targets.some(target=>target.enabled))enabled=false;
+      if(!(await listStocks()).length)enabled=false;
       publish();if(enabled)void tick();
     }),
     dispose:()=>{stop();}

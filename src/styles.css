@@ -45,3 +45,12 @@ button:hover{filter:brightness(.96)}button:focus-visible,select:focus-visible{ou
 @media(prefers-reduced-motion:reduce){.price-alert{animation:none}.monitor-switch,.monitor-switch:after{transition:none}}
 @media(max-width:900px){.target-table th:nth-child(2){width:122px}.target-table th:last-child{width:120px}.target-summary{align-items:flex-start;flex-direction:column;gap:4px}.target-dialog-heading,.target-dialog-footer{padding-left:18px;padding-right:18px}.target-table-wrap{padding:0 12px}.target-table th:first-child,.target-table td:first-child{width:45px}.target-dialog-footer{align-items:flex-end}}
 @media(max-width:600px){.head{align-items:flex-start}.head-actions{gap:4px}.target-settings{padding:6px 9px}.monitor-toggle{padding:6px}.target-dialog{max-width:calc(100vw - 24px)}.target-table{min-width:650px}.target-dialog-footer{flex-wrap:wrap}.target-dialog-footer>div{margin-left:auto}}
+
+html{scrollbar-gutter:stable}
+html.target-modal-open{overflow:hidden;overscroll-behavior:none}
+.target-dialog{overflow:hidden;overscroll-behavior:contain}
+.target-table-wrap{overscroll-behavior:contain}
+.target-dialog-heading,.target-summary{flex-shrink:0}
+
+.stock-tile>.tile-quote{display:flex;justify-content:center;align-items:baseline;gap:4px;width:100%;font-size:9.5px;line-height:1.6;letter-spacing:-.15px;opacity:1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tile-quote .quote-price{color:#4e6255;font-weight:550}.tile-quote .quote-change{color:#819086}.tile-quote .quote-up{color:#b64e48}.tile-quote .quote-down{color:#348569}
