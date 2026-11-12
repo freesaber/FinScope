@@ -2,6 +2,7 @@
 const fs=require('node:fs/promises');
 const path=require('node:path');
 const {stockCode}=require('./data.cjs');
+const {tradingState}=require('./trading-calendar.cjs');
 const INTERVAL=60_000;
 
 function normalizeTargets(targets,allowed){
@@ -31,12 +32,12 @@ function priceSignal(price,target){
   if(target.sell!==null&&price>=target.sell)return 'sell';
   return null;
 }
-function createPriceMonitor({root,listStocks,quotePrice,onChange=()=>{},now=Date.now,schedule=setTimeout,cancel=clearTimeout}){
+function createPriceMonitor({root,listStocks,quotePrice,onChange=()=>{},now=Date.now,schedule=setTimeout,cancel=clearTimeout,getTradingState=tradingState,refreshCalendar=async()=>{}}){
   const file=path.join(root,'price-targets.json');
   let targets=[],loaded,enabled=false,running=false,timer=null,generation=0,prices={},lastCheckedAt=null,nextCheckAt=null,revision=0,cycleStartedAt=0;
   let pending=Promise.resolve();
   const serialized=fn=>{const task=pending.then(fn);pending=task.catch(()=>{});return task;};
-  const snapshot=()=>({revision,enabled,running,intervalSeconds:INTERVAL/1000,targets:structuredClone(targets),prices:structuredClone(prices),lastCheckedAt,nextCheckAt});
+  const snapshot=()=>({trading:getTradingState(now()),revision,enabled,running,intervalSeconds:INTERVAL/1000,targets:structuredClone(targets),prices:structuredClone(prices),lastCheckedAt,nextCheckAt});
   const publish=()=>{revision++;onChange(snapshot());};
   async function ready(){
     if(!loaded)loaded=(async()=>{
@@ -44,6 +45,7 @@ function createPriceMonitor({root,listStocks,quotePrice,onChange=()=>{},now=Date
         const saved=JSON.parse(await fs.readFile(file,'utf8'));
         const allowed=new Set((await listStocks()).map(item=>item.code));
         targets=normalizeTargets(saved.targets.filter(target=>allowed.has(target.code)),allowed);
+        enabled=saved.enabled===true&&allowed.size>0;
       }catch(error){if(error.code!=='ENOENT')throw Error('目标价配置读取失败：'+error.message);}
     })();
     await loaded;
@@ -52,13 +54,25 @@ function createPriceMonitor({root,listStocks,quotePrice,onChange=()=>{},now=Date
   function stop(){enabled=false;generation++;clearTimer();for(const item of Object.values(prices))item.signal=null;publish();}
   function plan(){
     if(!enabled||timer!==null)return;
-    const delay=Math.max(1000,INTERVAL-(now()-cycleStartedAt));
-    nextCheckAt=new Date(now()+delay).toISOString();
-    timer=schedule(()=>{timer=null;nextCheckAt=null;void tick();},delay);
+    const state=getTradingState(now());
+    const intervalDelay=Math.max(1000,INTERVAL-(now()-cycleStartedAt));
+    const wait=state.isOpen?Math.min(intervalDelay,Math.max(1,Date.parse(state.sessionEnd)-now())):state.nextOpen?Math.max(1,Date.parse(state.nextOpen)-now()):86400000;
+    // 休市只安排唤醒，不发起行情请求；最长每天重新核对一次交易日历。
+    const delay=Math.min(wait,86400000);
+    nextCheckAt=state.isOpen?new Date(now()+delay).toISOString():state.nextOpen;
+    timer=schedule(()=>{
+      timer=null;nextCheckAt=null;
+      void (async()=>{
+        await refreshCalendar();
+        if(!enabled)return;
+        if(getTradingState(now()).isOpen)void tick();else{plan();publish();}
+      })();
+    },delay);
     timer?.unref?.();
   }
-  async function tick(){
+  async function tick(force=false){
     if(!enabled||running)return;
+    if(!force&&!getTradingState(now()).isOpen){plan();publish();return;}
     clearTimer();running=true;cycleStartedAt=now();
     const version=generation;
     publish();
@@ -89,14 +103,14 @@ function createPriceMonitor({root,listStocks,quotePrice,onChange=()=>{},now=Date
     }finally{
       running=false;
       // 设置或开关在请求期间变化时，旧响应不再生效，新一轮立即开始。
-      if(enabled&&version!==generation){void tick();}
+      if(enabled&&version!==generation){void tick(true);}
       else plan();
       publish();
     }
   }
   async function persist(){
     await fs.mkdir(root,{recursive:true});
-    await fs.writeFile(file+'.tmp',JSON.stringify({targets}),'utf8');
+    await fs.writeFile(file+'.tmp',JSON.stringify({targets,enabled}),'utf8');
     await fs.rename(file+'.tmp',file);
   }
   return {
@@ -108,23 +122,36 @@ function createPriceMonitor({root,listStocks,quotePrice,onChange=()=>{},now=Date
       targets=next;
       try{await persist();}catch(error){targets=previous;throw error;}
       generation++;prices={};clearTimer();
-      publish();if(enabled)void tick();return snapshot();
+      publish();if(enabled)void tick(true);return snapshot();
     }),
     setEnabled:value=>serialized(async()=>{
       await ready();
       if(typeof value!=='boolean')throw Error('监控开关状态无效');
-      if(!value){stop();return snapshot();}
       const allowed=new Set((await listStocks()).map(item=>item.code));
-      if(!allowed.size)throw Error('请先查询公司，加入自选名单后开启监控');
-      if(!enabled){enabled=true;generation++;prices={};publish();void tick();}
+      if(value&&!allowed.size)throw Error('请先查询公司，加入自选名单后开启监控');
+      const previous=enabled;enabled=value;
+      try{await persist();}catch(error){enabled=previous;throw error;}
+      if(!value){stop();return snapshot();}
+      if(!previous){generation++;prices={};publish();void tick(true);}
       return snapshot();
     }),
     remove:code=>serialized(async()=>{
       await ready();targets=targets.filter(target=>target.code!==code);delete prices[code];
-      generation++;clearTimer();await persist();
+      generation++;clearTimer();
       if(!(await listStocks()).length)enabled=false;
-      publish();if(enabled)void tick();
+      await persist();
+      publish();if(enabled)void tick(true);
     }),
+    start:async()=>{
+      await ready();await refreshCalendar();
+      if(enabled&&!running&&!lastCheckedAt){generation++;publish();void tick(true);}
+      else{if(enabled&&!running)plan();publish();}
+      return snapshot();
+    },
+    resume:async()=>{
+      await ready();await refreshCalendar();clearTimer();
+      if(enabled){if(getTradingState(now()).isOpen)void tick();else plan();publish();}
+    },
     dispose:()=>{stop();}
   };
 }

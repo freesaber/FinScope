@@ -15,7 +15,7 @@ async function fixture(t,quotePrice){
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'finscope-monitor-'));
   const stocks=[{code:'600100'},{code:'600101'},{code:'600102'},{code:'600103'}];
   const timers=new Map();let id=0;
-  const monitor=createPriceMonitor({root,listStocks:async()=>stocks,quotePrice,schedule:(fn,delay)=>{assert.ok(delay<=INTERVAL&&delay>=1000);timers.set(++id,fn);return id;},cancel:key=>timers.delete(key)});
+  const monitor=createPriceMonitor({root,getTradingState:()=>({isOpen:true,sessionEnd:'2099-01-01T00:00:00.000Z'}),listStocks:async()=>stocks,quotePrice,schedule:(fn,delay)=>{assert.ok(delay<=INTERVAL&&delay>=1000);timers.set(++id,fn);return id;},cancel:key=>timers.delete(key)});
   t.after(async()=>{monitor.dispose();await until(monitor,state=>!state.running);await fs.rm(root,{recursive:true,force:true});});
   return {root,stocks,timers,monitor,next:()=>{const [key,fn]=timers.entries().next().value;timers.delete(key);fn();}};
 }
@@ -42,12 +42,12 @@ test('开启立即查价，按60秒轮询，离开目标区间与报价失败都
   error=true;f.next();state=await until(f.monitor,s=>!s.running);assert.equal(state.prices['600100'].price,null);assert.equal(state.prices['600100'].signal,null);assert.ok(state.prices['600100'].error);
   await f.monitor.setEnabled(false);assert.equal(f.timers.size,0);
 });
-test('只保存目标配置，重启默认关闭，移除公司同步清理目标',async t=>{
+test('保存目标和开关状态，初次配置默认关闭，移除公司同步清理目标',async t=>{
   const f=await fixture(t,async()=>({price:5}));
   await f.monitor.save([{code:'600100',buy:10,sell:null,enabled:true}]);
   const reopened=createPriceMonitor({root:f.root,listStocks:async()=>f.stocks,quotePrice:async()=>{throw Error('不应自动联网');}});
   const state=await reopened.getState();assert.equal(state.enabled,false);assert.equal(state.targets[0].buy,10);
-  assert.deepEqual(Object.keys(JSON.parse(await fs.readFile(path.join(f.root,'price-targets.json'),'utf8'))),['targets']);
+  assert.deepEqual(Object.keys(JSON.parse(await fs.readFile(path.join(f.root,'price-targets.json'),'utf8'))),['targets','enabled']);
   await f.monitor.remove('600100');assert.equal((await f.monitor.getState()).targets.length,0);
   await f.monitor.setEnabled(true);
   const refreshed=await until(f.monitor,state=>!state.running&&state.lastCheckedAt);

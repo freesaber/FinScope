@@ -25,7 +25,7 @@ function monitorRowState(code){
   if(quote?.error)return {text:'报价失败 · 将重试',tone:'error'};
   if(cardPriceSignal(code)==='buy')return {text:'已到买入价',tone:'buy'};
   if(cardPriceSignal(code)==='sell')return {text:'已到卖出价',tone:'sell'};
-  return {text:quote?'监控中':'等待报价',tone:'active'};
+  return {text:quote?(monitorState.trading?.isOpen===false?'休市 · 已更新':'监控中'):'等待报价',tone:'active'};
 }
 function paintMonitorCards(){
   const configured=new Map(monitorState.targets.map(target=>[target.code,target]));
@@ -39,7 +39,7 @@ function paintMonitorCards(){
       change.textContent=Number.isFinite(percent)?`${percent>0?'+':''}${percent.toFixed(2)}%`:'—';
       change.classList.toggle('quote-up',percent>0);change.classList.toggle('quote-down',percent<0);
       const time=displayed?.quotedAt||displayed?.checkedAt||displayed?.fetchedAt;
-      tile.querySelector('.tile-quote').title=displayed?.error?displayed.error:displayed?`${displayed.source||'行情'}${time?' · '+new Date(time).toLocaleString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}):''}${!monitorState.enabled?' · 监控关闭，报价不自动刷新':''}`:'开启监控后每 60 秒更新';
+      tile.querySelector('.tile-quote').title=displayed?.error?displayed.error:displayed?`${displayed.source||'行情'}${time?' · '+new Date(time).toLocaleString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}):''}${!monitorState.enabled?' · 监控关闭，报价不自动刷新':''}`:'开启监控后获取报价，交易时段每 60 秒更新';
     }
     const signal=cardPriceSignal(code);
     cell.classList.toggle('price-buy',signal==='buy');cell.classList.toggle('price-sell',signal==='sell');
@@ -63,9 +63,10 @@ function applyMonitorState(state){
   const button=$('monitor-toggle'),count=state.targets.filter(target=>target.enabled).length;
   button.setAttribute('aria-checked',String(state.enabled));
   button.setAttribute('aria-label',state.enabled?'关闭价格监控':'开启价格监控');
-  $('monitor-toggle-label').textContent=state.enabled?'监控中':'监控关闭';
+  $('monitor-toggle-label').textContent=state.enabled?(state.trading?.isOpen===false?(state.running?'休市更新中':'休市暂停'):'监控中'):'监控关闭';
   const checked=state.lastCheckedAt?new Date(state.lastCheckedAt).toLocaleTimeString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}):'尚未完成';
-  button.title=state.enabled?`全部自选股每 60 秒更新 · ${count} 只设置触价提醒 · 上轮完成 ${checked}${state.running?' · 正在刷新报价':''}`:'开启后立即查询，之后每 60 秒更新全部自选股价格';
+  const next=state.trading?.nextOpen?new Date(state.trading.nextOpen).toLocaleString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}):'交易日历确认后';
+  button.title=state.enabled&&state.trading?.isOpen===false?`${state.trading.reason} · ${state.running?'正在更新一次报价':'已更新一次，不轮询'} · 下次恢复 ${next}`:state.enabled?`全部自选股每 60 秒更新 · ${count} 只设置触价提醒 · 上轮完成 ${checked}${state.running?' · 正在刷新报价':''}`:'开启后更新一次；交易时段每 60 秒刷新，休市暂停；重启恢复开关状态';
   paintMonitorCards();
   if($('target-dialog').open)paintTargetQuotes();
 }
@@ -113,6 +114,9 @@ async function openTargetSettings(){
   finally{monitorBusy=false;$('target-settings').disabled=false;}
 }
 $('target-settings').onclick=openTargetSettings;
+window.addEventListener('scroll',()=>{
+  if($('target-dialog').open&&targetScrollPosition&&(window.scrollY!==targetScrollPosition.top||window.scrollX!==targetScrollPosition.left))window.scrollTo({...targetScrollPosition,behavior:'instant'});
+},{passive:true});
 $('target-dialog').addEventListener('close',()=>{
   document.documentElement.classList.remove('target-modal-open');
   const position=targetScrollPosition;targetScrollPosition=null;

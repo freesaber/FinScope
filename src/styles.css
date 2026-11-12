@@ -47,7 +47,7 @@ button:hover{filter:brightness(.96)}button:focus-visible,select:focus-visible{ou
 @media(max-width:600px){.head{align-items:flex-start}.head-actions{gap:4px}.target-settings{padding:6px 9px}.monitor-toggle{padding:6px}.target-dialog{max-width:calc(100vw - 24px)}.target-table{min-width:650px}.target-dialog-footer{flex-wrap:wrap}.target-dialog-footer>div{margin-left:auto}}
 
 html{scrollbar-gutter:stable}
-html.target-modal-open{overflow:hidden;overscroll-behavior:none}
+html.target-modal-open{overflow:hidden;overscroll-behavior:none;overflow-anchor:none}
 .target-dialog{overflow:hidden;overscroll-behavior:contain}
 .target-table-wrap{overscroll-behavior:contain}
 .target-dialog-heading,.target-summary{flex-shrink:0}

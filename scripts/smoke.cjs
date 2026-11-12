@@ -37,7 +37,7 @@ app.on('browser-window-created',(_event,win)=>{
         await win.webContents.executeJavaScript(`showData(${JSON.stringify(data)})`);
         const store=createHistoryStore(app.getPath('userData')),samples=new Map();
         let requests=0,failRequests=false,holdRequests=false,releaseRequest;
-        demoMonitor=createPriceMonitor({root:app.getPath('userData'),listStocks:()=>store.list(),quotePrice:async code=>({price:code==='600100'?9:30,changePercent:code==='600100'?-1.25:2.5,source:'模拟行情',quotedAt:new Date().toISOString()}),onChange:state=>win.webContents.send('monitor:state',state)});
+        demoMonitor=createPriceMonitor({getTradingState:()=>({isOpen:true,sessionEnd:'2099-01-01T00:00:00.000Z'}),root:app.getPath('userData'),listStocks:()=>store.list(),quotePrice:async code=>({price:code==='600100'?9:30,changePercent:code==='600100'?-1.25:2.5,source:'模拟行情',quotedAt:new Date().toISOString()}),onChange:state=>win.webContents.send('monitor:state',state)});
         for(const channel of ['monitor:get','monitor:save','monitor:toggle'])ipcMain.removeHandler(channel);
         ipcMain.handle('monitor:get',()=>demoMonitor.getState());
         ipcMain.handle('monitor:save',(_event,targets)=>demoMonitor.save(targets));

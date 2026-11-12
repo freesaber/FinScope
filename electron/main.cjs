@@ -1,5 +1,5 @@
 'use strict';
-const {app, BrowserWindow, ipcMain, dialog, Menu, net, shell, Tray, nativeImage} = require('electron');
+const {app, BrowserWindow, ipcMain, dialog, Menu, net, shell, Tray, nativeImage, powerMonitor} = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
@@ -9,6 +9,7 @@ const {loadMarket} = require('./market.cjs');
 const {createPriceMonitor}=require('./price-monitor.cjs');
 const {createDailyAlerts}=require('./daily-alerts.cjs');
 const {createAlertToasts}=require('./alert-toasts.cjs');
+const {createTradingCalendar}=require('./trading-calendar.cjs');
 const page = path.join(__dirname, '../src/index.html');
 let window,priceMonitor,tray,dailyAlerts,toasts;
 function restoreWindow(){
@@ -28,9 +29,10 @@ function registerHandlers() {
   const history=createHistoryStore(app.getPath('userData'));
   toasts=createAlertToasts({getMainWindow:()=>window,onSpace:()=>dailyAlerts?.retry()});
   dailyAlerts=createDailyAlerts({root:app.getPath('userData'),listStocks:()=>history.list(),canNotify:()=>toasts.canShow(),notify:data=>toasts.show(data),onError:error=>console.warn('目标价提醒暂不可用：'+error.message)});
-  priceMonitor=createPriceMonitor({root:app.getPath('userData'),listStocks:()=>history.list(),quotePrice:code=>loadMarket(code,fetch,net.fetch,{priceOnly:true}),onChange:state=>{
+  const calendar=createTradingCalendar({root:app.getPath('userData')});
+  priceMonitor=createPriceMonitor({getTradingState:time=>calendar.state(time),refreshCalendar:()=>calendar.refresh(),root:app.getPath('userData'),listStocks:()=>history.list(),quotePrice:code=>loadMarket(code,fetch,net.fetch,{priceOnly:true}),onChange:state=>{
     if(window&&!window.isDestroyed()&&!window.webContents.isDestroyed())window.webContents.send('monitor:state',state);
-    tray?.setToolTip(state.enabled?'FinScope · 价格监控中':'FinScope · 价格监控已关闭');
+    tray?.setToolTip(state.enabled?(state.trading?.isOpen?'FinScope · 价格监控中':'FinScope · 休市暂停自动刷新'):'FinScope · 价格监控已关闭');
     void dailyAlerts.update(state);
   }});
   ipcMain.handle('monitor:get',event=>{trusted(event);return priceMonitor.getState();});
@@ -84,6 +86,6 @@ app.on('before-quit',()=>{dailyAlerts?.dispose();toasts?.dispose();priceMonitor?
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance',restoreWindow);
-  app.whenReady().then(() => { registerHandlers(); createWindow();createTray(); app.on('activate', () => {if(!window||window.isDestroyed())createWindow();else restoreWindow();}); });
+  app.whenReady().then(() => { registerHandlers(); createWindow();createTray();void priceMonitor.start().catch(error=>console.warn('监控恢复失败：'+error.message));powerMonitor.on('resume',()=>{void priceMonitor.resume().catch(error=>console.warn('监控恢复失败：'+error.message));});app.on('activate', () => {if(!window||window.isDestroyed())createWindow();else restoreWindow();}); });
   app.on('window-all-closed', () => {if (process.platform !== 'darwin') app.quit();});
 }
